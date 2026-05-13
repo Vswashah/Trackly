@@ -1,4 +1,5 @@
 require('dotenv').config();
+const db = require('./config/db');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -13,6 +14,13 @@ app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Test DB connection
+db.query('SELECT NOW()').then(() => {
+  console.log('✅ Database connection verified');
+}).catch(err => {
+  console.error('❌ Database connection failed:', err);
+});
 
 // Health check route
 app.get('/health', (req, res) => {
