@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,6 +14,7 @@ app.use(helmet());
 app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
+app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
 
 // Test DB connection
@@ -21,6 +23,8 @@ db.query('SELECT NOW()').then(() => {
 }).catch(err => {
   console.error('❌ Database connection failed:', err);
 });
+
+app.use('/api/v1/auth', require('./routes/auth.routes'));
 
 // Health check route
 app.get('/health', (req, res) => {
