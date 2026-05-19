@@ -1,4 +1,5 @@
 require('dotenv').config();
+const { startEmbeddingWorker } = require('./jobs/embedding.worker');
 const db = require('./config/db');
 const express = require('express');
 const cors = require('cors');
@@ -27,6 +28,7 @@ db.query('SELECT NOW()').then(() => {
 app.use('/api/v1/auth', require('./routes/auth.routes'));
 app.use('/api/v1/projects/:projectId/tickets', require('./routes/ticket.routes'));
 app.use('/api/v1/tickets/:ticketId/comments', require('./routes/comment.routes'));
+app.use('/api/v1/ai', require('./routes/ai.routes'));
 
 // Health check route
 app.get('/health', (req, res) => {
@@ -49,5 +51,7 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`🚀 Trackly server running on port ${PORT}`);
 });
+
+startEmbeddingWorker();
 
 module.exports = app;
