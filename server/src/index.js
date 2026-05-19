@@ -26,6 +26,7 @@ db.query('SELECT NOW()').then(() => {
 
 app.use('/api/v1/auth', require('./routes/auth.routes'));
 app.use('/api/v1/projects/:projectId/tickets', require('./routes/ticket.routes'));
+app.use('/api/v1/tickets/:ticketId/comments', require('./routes/comment.routes'));
 
 // Health check route
 app.get('/health', (req, res) => {
