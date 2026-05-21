@@ -1,23 +1,41 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Search, Filter, Plus, MoreHorizontal, MessageSquare, X } from 'lucide-react'
 import toast from 'react-hot-toast'
+import Sidebar from '../components/Sidebar'
 import api from '../lib/api'
 
 const STATUSES = [
-  { code: 'open', label: 'Open', color: '#6B7280' },
-  { code: 'in_progress', label: 'In Progress', color: '#3B82F6' },
-  { code: 'in_review', label: 'In Review', color: '#F59E0B' },
-  { code: 'done', label: 'Done', color: '#10B981' },
+  { code: 'open', label: 'Todo', color: '#6B7280', bg: 'bg-gray-100' },
+  { code: 'in_progress', label: 'In Progress', color: '#3B82F6', bg: 'bg-blue-100' },
+  { code: 'in_review', label: 'In Review', color: '#F59E0B', bg: 'bg-yellow-100' },
+  { code: 'done', label: 'Done', color: '#10B981', bg: 'bg-green-100' },
 ]
 
-const PRIORITIES = { p0: '#EF4444', p1: '#F59E0B', p2: '#3B82F6', p3: '#6B7280' }
+const PRIORITY_STYLES = {
+  p0: 'bg-red-50 text-red-600 border border-red-200',
+  p1: 'bg-orange-50 text-orange-600 border border-orange-200',
+  p2: 'bg-blue-50 text-blue-600 border border-blue-200',
+  p3: 'bg-gray-100 text-gray-500 border border-gray-200',
+}
+
+const LABEL_COLORS = [
+  'bg-blue-100 text-blue-700',
+  'bg-green-100 text-green-700',
+  'bg-orange-100 text-orange-700',
+  'bg-purple-100 text-purple-700',
+  'bg-red-100 text-red-700',
+]
 
 export default function ProjectBoard() {
   const { projectId } = useParams()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [showNewTicket, setShowNewTicket] = useState(false)
+  const [showFilter, setShowFilter] = useState(false)
+  const [search, setSearch] = useState('')
+  const [filterPriority, setFilterPriority] = useState('')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState('p2')
@@ -25,7 +43,7 @@ export default function ProjectBoard() {
   const [similar, setSimilar] = useState([])
   const [checkingDupe, setCheckingDupe] = useState(false)
 
-  const { data, isLoading } = useQuery({
+  const { data: tickets = [], isLoading } = useQuery({
     queryKey: ['tickets', projectId],
     queryFn: async () => {
       const res = await api.get(`/projects/${projectId}/tickets?limit=100`)
@@ -46,14 +64,7 @@ export default function ProjectBoard() {
       setDescription('')
       setSimilar([])
     },
-    onError: (err) => toast.error(err.response?.data?.error || 'Failed to create ticket'),
-  })
-
-  const updateStatusMutation = useMutation({
-    mutationFn: async ({ ticketKey, status }) => {
-      await api.patch(`/projects/${projectId}/tickets/${ticketKey}`, { status })
-    },
-    onSuccess: () => queryClient.invalidateQueries(['tickets', projectId]),
+    onError: (err) => toast.error(err.response?.data?.error || 'Failed'),
   })
 
   const checkSimilar = async (text) => {
@@ -66,224 +77,329 @@ export default function ProjectBoard() {
     finally { setCheckingDupe(false) }
   }
 
-  const ticketsByStatus = (status) =>
-    (data || []).filter(t => t.status === status)
+  const filteredTickets = tickets.filter(t => {
+    const matchSearch = !search || t.title.toLowerCase().includes(search.toLowerCase())
+    const matchPriority = !filterPriority || t.priority === filterPriority
+    return matchSearch && matchPriority
+  })
+
+  const ticketsByStatus = (code) => filteredTickets.filter(t => t.status === code)
 
   return (
-    <div style={styles.container}>
-      {/* Nav */}
-      <div style={styles.nav}>
-        <div style={styles.navLeft}>
-          <span style={styles.navLogo} onClick={() => navigate('/')}>Trackly</span>
-          <span style={styles.navSep}>/</span>
-          <span style={styles.navProject}>Trackly App</span>
+    <div className="flex min-h-screen bg-gray-50">
+      <Sidebar />
+      <div className="ml-56 flex-1 flex flex-col">
+
+        {/* Header */}
+        <div className="bg-white border-b border-gray-200 px-6 py-4">
+          <div className="flex items-center justify-between mb-4">
+            <h1 className="text-xl font-semibold text-gray-900">Tickets</h1>
+            <button
+              onClick={() => setShowNewTicket(true)}
+              className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
+            >
+              <Plus size={15} />
+              New
+            </button>
+          </div>
+
+          {/* Tabs + Search */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1 border-b border-transparent">
+              {['List', 'Board', 'Timeline', 'Calendar'].map((tab, i) => (
+                <button key={tab} className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                  tab === 'Board'
+                    ? 'text-gray-900 font-medium border-b-2 border-gray-900'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}>
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  className="pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-gray-400 w-48"
+                  placeholder="Search..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                />
+              </div>
+              <button
+                onClick={() => setShowFilter(!showFilter)}
+                className={`flex items-center gap-2 px-3 py-1.5 text-sm border rounded-lg transition-colors ${
+                  showFilter ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                }`}
+              >
+                <Filter size={14} />
+                Filters
+              </button>
+            </div>
+          </div>
         </div>
-        <button style={styles.newBtn} onClick={() => setShowNewTicket(true)}>
-          + New Ticket
-        </button>
+
+        <div className="flex flex-1 overflow-hidden">
+          {/* Board */}
+          <div className="flex-1 p-6 overflow-x-auto">
+            <div className="flex gap-4 min-w-max">
+              {STATUSES.map(status => (
+                <div key={status.code} className="w-72">
+                  {/* Column header */}
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-700">{status.label}</span>
+                      <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
+                        {ticketsByStatus(status.code).length}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setShowNewTicket(true)}
+                        className="text-gray-400 hover:text-gray-600 p-1 rounded"
+                      >
+                        <Plus size={14} />
+                      </button>
+                      <button className="text-gray-400 hover:text-gray-600 p-1 rounded">
+                        <MoreHorizontal size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Cards */}
+                  <div className="space-y-2">
+                    {isLoading ? (
+                      <div className="bg-white rounded-xl border border-gray-200 p-4 animate-pulse">
+                        <div className="h-3 bg-gray-100 rounded mb-2 w-3/4"></div>
+                        <div className="h-3 bg-gray-100 rounded w-1/2"></div>
+                      </div>
+                    ) : (
+                      ticketsByStatus(status.code).map((ticket, idx) => (
+                        <div
+                          key={ticket.id}
+                          className="bg-white rounded-xl border border-gray-200 p-4 cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all group"
+                          onClick={() => navigate(`/projects/${projectId}/tickets/${ticket.ticket_key}`)}
+                        >
+                          {/* Labels row */}
+                          <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_STYLES[ticket.priority]}`}>
+                              {ticket.priority?.toUpperCase()}
+                            </span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${LABEL_COLORS[idx % LABEL_COLORS.length]}`}>
+                              {ticket.type}
+                            </span>
+                          </div>
+
+                          {/* Title */}
+                          <div className="text-sm font-medium text-gray-900 mb-1 leading-snug">
+                            {ticket.title}
+                          </div>
+
+                          {/* Company / project */}
+                          <div className="flex items-center gap-1 mb-3">
+                            <div className="w-3.5 h-3.5 bg-gray-200 rounded-sm"></div>
+                            <span className="text-xs text-gray-400">Trackly App</span>
+                          </div>
+
+                          {/* Footer */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1">
+                              <div className="w-6 h-6 rounded-full bg-indigo-500 flex items-center justify-center text-white text-xs font-medium">
+                                V
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-gray-400">
+                              <span>{new Date(ticket.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                              <div className="flex items-center gap-0.5">
+                                <MessageSquare size={11} />
+                                <span>0</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+
+                    {/* Add task button */}
+                    <button
+                      onClick={() => setShowNewTicket(true)}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:text-gray-600 hover:bg-white rounded-lg border border-dashed border-transparent hover:border-gray-200 transition-all flex items-center gap-2"
+                    >
+                      <Plus size={14} />
+                      Add Task
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Filter Panel */}
+          {showFilter && (
+            <div className="w-64 bg-white border-l border-gray-200 p-5 overflow-y-auto flex-shrink-0">
+              <div className="flex items-center justify-between mb-4">
+                <span className="font-semibold text-gray-900 text-sm">Filter By</span>
+                <button onClick={() => setShowFilter(false)} className="text-gray-400 hover:text-gray-600">
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Priority filter */}
+              <div className="mb-5">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Priority</span>
+                  {filterPriority && (
+                    <button onClick={() => setFilterPriority('')} className="text-xs text-blue-600 hover:text-blue-700">
+                      Clear
+                    </button>
+                  )}
+                </div>
+                {[
+                  { value: 'p0', label: 'Critical' },
+                  { value: 'p1', label: 'High' },
+                  { value: 'p2', label: 'Medium' },
+                  { value: 'p3', label: 'Low' },
+                ].map(p => (
+                  <label key={p.value} className="flex items-center gap-2 py-1.5 cursor-pointer group">
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
+                      filterPriority === p.value
+                        ? 'border-gray-900 bg-gray-900'
+                        : 'border-gray-300 group-hover:border-gray-400'
+                    }`}>
+                      {filterPriority === p.value && (
+                        <div className="w-1.5 h-1.5 rounded-full bg-white"></div>
+                      )}
+                    </div>
+                    <span className="text-sm text-gray-700">{p.label}</span>
+                  </label>
+                ))}
+              </div>
+
+              {/* Type filter */}
+              <div className="mb-5">
+                <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Type</div>
+                {['Bug', 'Feature', 'Task', 'Chore'].map(t => (
+                  <label key={t} className="flex items-center gap-2 py-1.5 cursor-pointer group">
+                    <div className="w-4 h-4 rounded-full border-2 border-gray-300 group-hover:border-gray-400"></div>
+                    <span className="text-sm text-gray-700">{t}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* New Ticket Modal */}
       {showNewTicket && (
-        <div style={styles.overlay}>
-          <div style={styles.modal}>
-            <h3 style={styles.modalTitle}>New Ticket</h3>
-
-            <input
-              style={styles.input}
-              placeholder="Title"
-              value={title}
-              onChange={e => {
-                setTitle(e.target.value)
-                clearTimeout(window._dupeTimer)
-                window._dupeTimer = setTimeout(() => checkSimilar(e.target.value), 500)
-              }}
-              autoFocus
-            />
-
-            {/* Similar tickets warning */}
-            {checkingDupe && <p style={styles.checking}>Checking for duplicates...</p>}
-            {similar.length > 0 && (
-              <div style={styles.dupeWarning}>
-                <p style={styles.dupeTitle}>⚠️ Similar tickets found:</p>
-                {similar.map(t => (
-                  <div key={t.ticket_key} style={styles.dupeItem}>
-                    <span style={styles.dupeKey}>{t.ticket_key}</span>
-                    <span style={styles.dupeText}>{t.title}</span>
-                    <span style={styles.dupeSim}>{Math.round(t.similarity * 100)}%</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <textarea
-              style={{ ...styles.input, height: '100px', resize: 'vertical' }}
-              placeholder="Description"
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-            />
-
-            <div style={styles.row}>
-              <select style={styles.select} value={priority} onChange={e => setPriority(e.target.value)}>
-                <option value="p0">P0 - Critical</option>
-                <option value="p1">P1 - High</option>
-                <option value="p2">P2 - Medium</option>
-                <option value="p3">P3 - Low</option>
-              </select>
-              <select style={styles.select} value={type} onChange={e => setType(e.target.value)}>
-                <option value="bug">Bug</option>
-                <option value="feature">Feature</option>
-                <option value="task">Task</option>
-                <option value="chore">Chore</option>
-              </select>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <h2 className="font-semibold text-gray-900">New Ticket</h2>
+              <button
+                onClick={() => { setShowNewTicket(false); setSimilar([]); setTitle('') }}
+                className="text-gray-400 hover:text-gray-600 p-1"
+              >
+                <X size={18} />
+              </button>
             </div>
 
-            <div style={styles.modalBtns}>
+            <div className="p-5 space-y-4">
+              {/* Title */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Title</label>
+                <input
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-gray-400 transition-colors"
+                  placeholder="What needs to be done?"
+                  value={title}
+                  autoFocus
+                  onChange={e => {
+                    setTitle(e.target.value)
+                    clearTimeout(window._dupeTimer)
+                    window._dupeTimer = setTimeout(() => checkSimilar(e.target.value), 500)
+                  }}
+                />
+              </div>
+
+              {/* Duplicate warning */}
+              {checkingDupe && (
+                <p className="text-xs text-gray-400">Checking for duplicates...</p>
+              )}
+              {similar.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <p className="text-xs font-medium text-amber-700 mb-2">⚠️ Similar tickets found</p>
+                  {similar.map(t => (
+                    <div key={t.ticket_key} className="flex items-center gap-2 text-xs text-amber-600 mb-1">
+                      <span className="font-mono font-medium">{t.ticket_key}</span>
+                      <span className="flex-1 truncate">{t.title}</span>
+                      <span className="font-medium">{Math.round(t.similarity * 100)}%</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Description */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Description</label>
+                <textarea
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-gray-400 resize-none transition-colors"
+                  placeholder="Add more details..."
+                  rows={3}
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                />
+              </div>
+
+              {/* Priority + Type */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1 block">Priority</label>
+                  <select
+                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-gray-400 bg-white"
+                    value={priority}
+                    onChange={e => setPriority(e.target.value)}
+                  >
+                    <option value="p0">P0 — Critical</option>
+                    <option value="p1">P1 — High</option>
+                    <option value="p2">P2 — Medium</option>
+                    <option value="p3">P3 — Low</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1 block">Type</label>
+                  <select
+                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-gray-400 bg-white"
+                    value={type}
+                    onChange={e => setType(e.target.value)}
+                  >
+                    <option value="bug">Bug</option>
+                    <option value="feature">Feature</option>
+                    <option value="task">Task</option>
+                    <option value="chore">Chore</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-gray-100">
               <button
-                style={styles.btn}
+                onClick={() => { setShowNewTicket(false); setSimilar([]); setTitle('') }}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
                 onClick={() => createMutation.mutate({ title, description, priority, type })}
-                disabled={!title || createMutation.isPending}
+                disabled={!title.trim() || createMutation.isPending}
+                className="px-4 py-2 text-sm bg-black text-white rounded-lg font-medium hover:bg-gray-800 disabled:opacity-50 transition-colors"
               >
                 {createMutation.isPending ? 'Creating...' : 'Create Ticket'}
-              </button>
-              <button style={styles.btnSecondary} onClick={() => {
-                setShowNewTicket(false)
-                setSimilar([])
-                setTitle('')
-              }}>
-                Cancel
               </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* Kanban Board */}
-      <div style={styles.board}>
-        {STATUSES.map(status => (
-          <div key={status.code} style={styles.column}>
-            <div style={styles.columnHeader}>
-              <div style={{ ...styles.columnDot, background: status.color }} />
-              <span style={styles.columnTitle}>{status.label}</span>
-              <span style={styles.columnCount}>{ticketsByStatus(status.code).length}</span>
-            </div>
-
-            <div style={styles.columnBody}>
-              {isLoading ? (
-                <p style={styles.loading}>Loading...</p>
-              ) : (
-                ticketsByStatus(status.code).map(ticket => (
-                  <div
-                    key={ticket.id}
-                    style={styles.ticketCard}
-                    onClick={() => navigate(`/projects/${projectId}/tickets/${ticket.ticket_key}`)}
-                  >
-                    <div style={styles.ticketKey}>{ticket.ticket_key}</div>
-                    <div style={styles.ticketTitle}>{ticket.title}</div>
-                    <div style={styles.ticketMeta}>
-                      <span style={{
-                        ...styles.priorityBadge,
-                        background: PRIORITIES[ticket.priority] + '20',
-                        color: PRIORITIES[ticket.priority],
-                      }}>
-                        {ticket.priority?.toUpperCase()}
-                      </span>
-                      <span style={styles.typeBadge}>{ticket.type}</span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   )
-}
-
-const styles = {
-  container: { minHeight: '100vh', background: '#0d0f12', display: 'flex', flexDirection: 'column' },
-  nav: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '0 24px', height: '52px', background: '#13161b',
-    borderBottom: '1px solid #252a33', flexShrink: 0,
-  },
-  navLeft: { display: 'flex', alignItems: 'center', gap: '8px' },
-  navLogo: { color: '#e2e4e9', fontWeight: '700', fontSize: '16px', cursor: 'pointer' },
-  navSep: { color: '#252a33', fontSize: '18px' },
-  navProject: { color: '#8b90a0', fontSize: '14px' },
-  newBtn: {
-    background: '#3b8de0', color: '#fff', border: 'none', borderRadius: '6px',
-    padding: '7px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer',
-  },
-  board: {
-    display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
-    gap: '16px', padding: '20px 24px', flex: 1, overflowX: 'auto',
-  },
-  column: {
-    background: '#13161b', border: '1px solid #252a33',
-    borderRadius: '10px', display: 'flex', flexDirection: 'column', minHeight: '400px',
-  },
-  columnHeader: {
-    display: 'flex', alignItems: 'center', gap: '8px',
-    padding: '12px 14px', borderBottom: '1px solid #252a33',
-  },
-  columnDot: { width: '8px', height: '8px', borderRadius: '50%' },
-  columnTitle: { color: '#e2e4e9', fontSize: '13px', fontWeight: '500', flex: 1 },
-  columnCount: {
-    background: '#1a1e25', color: '#8b90a0', fontSize: '11px',
-    padding: '2px 7px', borderRadius: '10px',
-  },
-  columnBody: { padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 },
-  ticketCard: {
-    background: '#1a1e25', border: '1px solid #252a33', borderRadius: '8px',
-    padding: '12px', cursor: 'pointer',
-  },
-  ticketKey: { color: '#555b6a', fontSize: '11px', marginBottom: '4px' },
-  ticketTitle: { color: '#e2e4e9', fontSize: '13px', lineHeight: '1.4', marginBottom: '8px' },
-  ticketMeta: { display: 'flex', gap: '6px', flexWrap: 'wrap' },
-  priorityBadge: { fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: '600' },
-  typeBadge: {
-    fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
-    background: '#252a33', color: '#8b90a0',
-  },
-  overlay: {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
-  },
-  modal: {
-    background: '#13161b', border: '1px solid #252a33', borderRadius: '12px',
-    padding: '28px', width: '100%', maxWidth: '520px',
-    display: 'flex', flexDirection: 'column', gap: '12px',
-  },
-  modalTitle: { color: '#e2e4e9', fontSize: '18px', fontWeight: '600', margin: 0 },
-  input: {
-    background: '#1a1e25', border: '1px solid #252a33', borderRadius: '8px',
-    padding: '10px 14px', color: '#e2e4e9', fontSize: '14px', outline: 'none',
-    fontFamily: 'inherit',
-  },
-  checking: { color: '#8b90a0', fontSize: '12px', margin: 0 },
-  dupeWarning: {
-    background: '#2a1a0a', border: '1px solid #5a3010', borderRadius: '8px', padding: '12px',
-  },
-  dupeTitle: { color: '#f0a060', fontSize: '12px', fontWeight: '600', margin: '0 0 8px' },
-  dupeItem: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' },
-  dupeKey: { color: '#8b90a0', fontSize: '11px', minWidth: '70px' },
-  dupeText: { color: '#e2e4e9', fontSize: '12px', flex: 1 },
-  dupeSim: { color: '#f0a060', fontSize: '11px', fontWeight: '600' },
-  row: { display: 'flex', gap: '10px' },
-  select: {
-    flex: 1, background: '#1a1e25', border: '1px solid #252a33', borderRadius: '8px',
-    padding: '10px 14px', color: '#e2e4e9', fontSize: '13px', outline: 'none',
-  },
-  modalBtns: { display: 'flex', gap: '8px' },
-  btn: {
-    background: '#3b8de0', color: '#fff', border: 'none', borderRadius: '8px',
-    padding: '10px 20px', fontSize: '13px', fontWeight: '600', cursor: 'pointer',
-  },
-  btnSecondary: {
-    background: 'transparent', color: '#8b90a0', border: '1px solid #252a33',
-    borderRadius: '8px', padding: '10px 16px', fontSize: '13px', cursor: 'pointer',
-  },
-  loading: { color: '#8b90a0', fontSize: '13px', padding: '8px' },
 }

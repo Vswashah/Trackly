@@ -1,14 +1,24 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { ArrowLeft, Sparkles, Bot, Send, Clock, User, Tag, Calendar } from 'lucide-react'
 import toast from 'react-hot-toast'
+import Sidebar from '../components/Sidebar'
 import api from '../lib/api'
 
-const PRIORITIES = { p0: '#EF4444', p1: '#F59E0B', p2: '#3B82F6', p3: '#6B7280' }
-const PRIORITY_LABELS = { p0: 'Critical', p1: 'High', p2: 'Medium', p3: 'Low' }
-const STATUS_COLORS = {
-  open: '#6B7280', in_progress: '#3B82F6',
-  in_review: '#F59E0B', done: '#10B981', cancelled: '#EF4444'
+const PRIORITY_STYLES = {
+  p0: 'bg-red-50 text-red-600 border border-red-200',
+  p1: 'bg-orange-50 text-orange-600 border border-orange-200',
+  p2: 'bg-blue-50 text-blue-600 border border-blue-200',
+  p3: 'bg-gray-100 text-gray-500 border border-gray-200',
+}
+
+const STATUS_STYLES = {
+  open: 'bg-gray-100 text-gray-600',
+  in_progress: 'bg-blue-50 text-blue-600',
+  in_review: 'bg-yellow-50 text-yellow-600',
+  done: 'bg-green-50 text-green-600',
+  cancelled: 'bg-red-50 text-red-600',
 }
 
 export default function TicketDetail() {
@@ -20,6 +30,7 @@ export default function TicketDetail() {
   const [summary, setSummary] = useState(null)
   const [loadingHints, setLoadingHints] = useState(false)
   const [loadingSummary, setLoadingSummary] = useState(false)
+  const [activeAI, setActiveAI] = useState(null)
 
   const { data: ticket, isLoading } = useQuery({
     queryKey: ['ticket', ticketKey],
@@ -35,9 +46,9 @@ export default function TicketDetail() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['ticket', ticketKey])
-      toast.success('Ticket updated')
+      queryClient.invalidateQueries(['tickets', projectId])
+      toast.success('Updated')
     },
-    onError: () => toast.error('Failed to update'),
   })
 
   const commentMutation = useMutation({
@@ -49,329 +60,324 @@ export default function TicketDetail() {
       setComment('')
       toast.success('Comment added')
     },
-    onError: () => toast.error('Failed to add comment'),
   })
-
-  const getHints = async () => {
-    setLoadingHints(true)
-    try {
-      const res = await api.get(`/ai/hints/${ticketKey}`)
-      setHints(res.data.hints)
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'AI unavailable')
-    } finally {
-      setLoadingHints(false)
-    }
-  }
 
   const getSummary = async () => {
     setLoadingSummary(true)
+    setActiveAI('summary')
     try {
       const res = await api.post(`/ai/summarize/${ticketKey}`)
       setSummary(res.data.summary)
     } catch (err) {
       toast.error(err.response?.data?.error || 'AI unavailable')
+      setActiveAI(null)
     } finally {
       setLoadingSummary(false)
     }
   }
 
-  if (isLoading) return <div style={styles.loading}>Loading...</div>
-  if (!ticket) return <div style={styles.loading}>Ticket not found</div>
+  const getHints = async () => {
+    setLoadingHints(true)
+    setActiveAI('hints')
+    try {
+      const res = await api.get(`/ai/hints/${ticketKey}`)
+      setHints(res.data.hints)
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'AI unavailable')
+      setActiveAI(null)
+    } finally {
+      setLoadingHints(false)
+    }
+  }
+
+  if (isLoading) return (
+    <div className="flex min-h-screen bg-gray-50">
+      <Sidebar />
+      <div className="ml-56 flex-1 flex items-center justify-center">
+        <div className="text-gray-400 text-sm">Loading ticket...</div>
+      </div>
+    </div>
+  )
+
+  if (!ticket) return (
+    <div className="flex min-h-screen bg-gray-50">
+      <Sidebar />
+      <div className="ml-56 flex-1 flex items-center justify-center">
+        <div className="text-gray-400 text-sm">Ticket not found</div>
+      </div>
+    </div>
+  )
 
   return (
-    <div style={styles.container}>
-      {/* Nav */}
-      <div style={styles.nav}>
-        <div style={styles.navLeft}>
-          <span style={styles.navLogo} onClick={() => navigate('/')}>Trackly</span>
-          <span style={styles.navSep}>/</span>
-          <span style={styles.navLink} onClick={() => navigate(`/projects/${projectId}`)}>
-            Board
+    <div className="flex min-h-screen bg-gray-50">
+      <Sidebar />
+      <div className="ml-56 flex-1 flex flex-col">
+
+        {/* Header */}
+        <div className="bg-white border-b border-gray-200 px-6 py-3.5 flex items-center gap-3">
+          <button
+            onClick={() => navigate(`/projects/${projectId}`)}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <span className="text-sm text-gray-400">/</span>
+          <span className="text-sm text-gray-500 font-mono">{ticket.ticket_key}</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[ticket.status]}`}>
+            {ticket.status?.replace('_', ' ')}
           </span>
-          <span style={styles.navSep}>/</span>
-          <span style={styles.navCurrent}>{ticket.ticket_key}</span>
         </div>
-      </div>
 
-      <div style={styles.layout}>
-        {/* Main content */}
-        <div style={styles.main}>
+        <div className="flex flex-1 overflow-hidden">
+          {/* Main */}
+          <div className="flex-1 overflow-y-auto p-6">
 
-          {/* Ticket header */}
-          <div style={styles.ticketHeader}>
-            <div style={styles.ticketMeta}>
-              <span style={styles.ticketKey}>{ticket.ticket_key}</span>
-              <span style={{
-                ...styles.statusBadge,
-                background: STATUS_COLORS[ticket.status] + '20',
-                color: STATUS_COLORS[ticket.status],
-              }}>
-                {ticket.status?.replace('_', ' ')}
+            {/* Title */}
+            <h1 className="text-xl font-semibold text-gray-900 mb-2 leading-snug">
+              {ticket.title}
+            </h1>
+
+            {/* Badges */}
+            <div className="flex items-center gap-2 mb-6">
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_STYLES[ticket.priority]}`}>
+                {ticket.priority?.toUpperCase()}
               </span>
-              <span style={{
-                ...styles.priorityBadge,
-                background: PRIORITIES[ticket.priority] + '20',
-                color: PRIORITIES[ticket.priority],
-              }}>
-                {PRIORITY_LABELS[ticket.priority]}
+              <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">
+                {ticket.type}
               </span>
-            </div>
-            <h1 style={styles.ticketTitle}>{ticket.title}</h1>
-            <p style={styles.ticketDesc}>{ticket.description || 'No description provided.'}</p>
-          </div>
-
-          {/* AI Features */}
-          <div style={styles.aiSection}>
-            <div style={styles.aiButtons}>
-              <button
-                style={styles.aiBtn}
-                onClick={getSummary}
-                disabled={loadingSummary}
-              >
-                {loadingSummary ? '...' : '✨ Summarize'}
-              </button>
-              <button
-                style={styles.aiBtn}
-                onClick={getHints}
-                disabled={loadingHints || !ticket.has_embedding}
-              >
-                {loadingHints ? '...' : ticket.has_embedding ? '🤖 Get AI Hints' : '⏳ Embedding...'}
-              </button>
+              {ticket.has_embedding && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-600 border border-green-200">
+                  ✓ AI ready
+                </span>
+              )}
             </div>
 
-            {summary && (
-              <div style={styles.aiOutput}>
-                <div style={styles.aiOutputTitle}>✨ Summary</div>
-                <pre style={styles.aiOutputText}>{summary}</pre>
-                <button style={styles.aiClose} onClick={() => setSummary(null)}>✕</button>
+            {/* Description */}
+            <div className="bg-white rounded-xl border border-gray-200 p-5 mb-4">
+              <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">Description</h3>
+              <p className="text-sm text-gray-700 leading-relaxed">
+                {ticket.description || 'No description provided.'}
+              </p>
+            </div>
+
+            {/* AI Section */}
+            <div className="bg-white rounded-xl border border-gray-200 p-5 mb-4">
+              <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">AI Features</h3>
+              <div className="flex items-center gap-2 mb-4">
+                <button
+                  onClick={getSummary}
+                  disabled={loadingSummary}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded-lg text-gray-600 hover:border-gray-300 hover:bg-gray-50 transition-all disabled:opacity-50"
+                >
+                  <Sparkles size={14} className="text-amber-500" />
+                  {loadingSummary ? 'Summarizing...' : 'Summarize'}
+                </button>
+                <button
+                  onClick={getHints}
+                  disabled={loadingHints || !ticket.has_embedding}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded-lg text-gray-600 hover:border-gray-300 hover:bg-gray-50 transition-all disabled:opacity-50"
+                >
+                  <Bot size={14} className="text-blue-500" />
+                  {loadingHints ? 'Thinking...' : !ticket.has_embedding ? 'Embedding pending...' : 'Get AI Hints'}
+                </button>
               </div>
-            )}
 
-            {hints && (
-              <div style={styles.aiOutput}>
-                <div style={styles.aiOutputTitle}>🤖 Resolution Hints</div>
-                <pre style={styles.aiOutputText}>{hints}</pre>
-                <button style={styles.aiClose} onClick={() => setHints(null)}>✕</button>
-              </div>
-            )}
-          </div>
-
-          {/* Comments */}
-          <div style={styles.section}>
-            <h3 style={styles.sectionTitle}>Comments ({ticket.comments?.length || 0})</h3>
-
-            {ticket.comments?.map(c => (
-              <div key={c.id} style={styles.comment}>
-                <div style={styles.commentAvatar}>
-                  {c.author_name?.charAt(0).toUpperCase()}
-                </div>
-                <div style={styles.commentBody}>
-                  <div style={styles.commentAuthor}>
-                    {c.author_name}
-                    {c.is_edited && <span style={styles.edited}> (edited)</span>}
+              {/* AI Output */}
+              {activeAI === 'summary' && summary && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Sparkles size={13} className="text-amber-600" />
+                    <span className="text-xs font-medium text-amber-700">Summary</span>
                   </div>
-                  <div style={styles.commentText}>{c.body}</div>
+                  <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">{summary}</pre>
+                </div>
+              )}
+
+              {activeAI === 'hints' && hints && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Bot size={13} className="text-blue-600" />
+                    <span className="text-xs font-medium text-blue-700">Resolution Hints</span>
+                  </div>
+                  <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">{hints}</pre>
+                </div>
+              )}
+            </div>
+
+            {/* Comments */}
+            <div className="bg-white rounded-xl border border-gray-200 p-5 mb-4">
+              <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-4">
+                Comments ({ticket.comments?.length || 0})
+              </h3>
+
+              <div className="space-y-4 mb-4">
+                {ticket.comments?.map(c => (
+                  <div key={c.id} className="flex gap-3">
+                    <div className="w-7 h-7 rounded-full bg-indigo-500 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
+                      {c.author_name?.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-medium text-gray-900">{c.author_name}</span>
+                        {c.is_edited && <span className="text-xs text-gray-400">(edited)</span>}
+                        <span className="text-xs text-gray-400">
+                          {new Date(c.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-700 leading-relaxed">{c.body}</p>
+                    </div>
+                  </div>
+                ))}
+
+                {!ticket.comments?.length && (
+                  <p className="text-sm text-gray-400 text-center py-4">No comments yet</p>
+                )}
+              </div>
+
+              {/* Comment input */}
+              <div className="flex gap-3">
+                <div className="w-7 h-7 rounded-full bg-indigo-500 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
+                  V
+                </div>
+                <div className="flex-1 flex gap-2">
+                  <input
+                    className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-gray-400 transition-colors"
+                    placeholder="Add a comment..."
+                    value={comment}
+                    onChange={e => setComment(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey && comment.trim()) {
+                        commentMutation.mutate(comment)
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => commentMutation.mutate(comment)}
+                    disabled={!comment.trim() || commentMutation.isPending}
+                    className="px-3 py-2 bg-black text-white rounded-lg hover:bg-gray-800 disabled:opacity-50 transition-colors"
+                  >
+                    <Send size={14} />
+                  </button>
                 </div>
               </div>
-            ))}
+            </div>
 
-            <div style={styles.commentForm}>
-              <textarea
-                style={styles.commentInput}
-                placeholder="Add a comment..."
-                value={comment}
-                onChange={e => setComment(e.target.value)}
-                rows={3}
-              />
-              <button
-                style={styles.commentBtn}
-                onClick={() => commentMutation.mutate(comment)}
-                disabled={!comment.trim() || commentMutation.isPending}
-              >
-                {commentMutation.isPending ? 'Posting...' : 'Comment'}
-              </button>
+            {/* Activity */}
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-4">Activity</h3>
+              <div className="space-y-2">
+                {ticket.history?.map((h, i) => (
+                  <div key={i} className="flex items-start gap-2 text-xs text-gray-500 py-1 border-b border-gray-50 last:border-0">
+                    <Clock size={11} className="mt-0.5 flex-shrink-0 text-gray-300" />
+                    <span>
+                      <span className="font-medium text-gray-700">{h.actor_name}</span>
+                      {h.field_name === 'created'
+                        ? ' created this ticket'
+                        : ` changed ${h.field_name} to "${h.new_value}"`
+                      }
+                    </span>
+                    <span className="ml-auto flex-shrink-0 text-gray-300">
+                      {new Date(h.changed_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* History */}
-          <div style={styles.section}>
-            <h3 style={styles.sectionTitle}>Activity</h3>
-            {ticket.history?.map((h, i) => (
-              <div key={i} style={styles.historyItem}>
-                <span style={styles.historyActor}>{h.actor_name}</span>
-                <span style={styles.historyText}>
-                  {h.change_type === 'field_change' && h.field_name === 'created'
-                    ? ' created this ticket'
-                    : ` changed ${h.field_name} from "${h.old_value}" to "${h.new_value}"`
-                  }
-                </span>
-                <span style={styles.historyTime}>
-                  {new Date(h.changed_at).toLocaleDateString()}
+          {/* Sidebar */}
+          <div className="w-60 bg-white border-l border-gray-200 p-5 overflow-y-auto flex-shrink-0">
+            <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-4">Details</h3>
+
+            <div className="space-y-4">
+              {/* Status */}
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Status</label>
+                <select
+                  className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-gray-400 bg-white"
+                  value={ticket.status}
+                  onChange={e => updateMutation.mutate({ status: e.target.value })}
+                >
+                  <option value="open">Open</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="in_review">In Review</option>
+                  <option value="done">Done</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+
+              {/* Priority */}
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Priority</label>
+                <select
+                  className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-gray-400 bg-white"
+                  value={ticket.priority}
+                  onChange={e => updateMutation.mutate({ priority: e.target.value })}
+                >
+                  <option value="p0">P0 — Critical</option>
+                  <option value="p1">P1 — High</option>
+                  <option value="p2">P2 — Medium</option>
+                  <option value="p3">P3 — Low</option>
+                </select>
+              </div>
+
+              <hr className="border-gray-100" />
+
+              {/* Type */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                  <Tag size={12} />
+                  Type
+                </div>
+                <span className="text-xs text-gray-700 font-medium">{ticket.type}</span>
+              </div>
+
+              {/* Reporter */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                  <User size={12} />
+                  Reporter
+                </div>
+                <span className="text-xs text-gray-700 font-medium">{ticket.reporter_name}</span>
+              </div>
+
+              {/* Assignee */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                  <User size={12} />
+                  Assignee
+                </div>
+                <span className="text-xs text-gray-700">{ticket.assignee_name || 'Unassigned'}</span>
+              </div>
+
+              {/* Created */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                  <Calendar size={12} />
+                  Created
+                </div>
+                <span className="text-xs text-gray-700">
+                  {new Date(ticket.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 </span>
               </div>
-            ))}
-          </div>
-        </div>
 
-        {/* Sidebar */}
-        <div style={styles.sidebar}>
-          <div style={styles.sideSection}>
-            <div style={styles.sideLabel}>Status</div>
-            <select
-              style={styles.sideSelect}
-              value={ticket.status}
-              onChange={e => updateMutation.mutate({ status: e.target.value })}
-            >
-              <option value="open">Open</option>
-              <option value="in_progress">In Progress</option>
-              <option value="in_review">In Review</option>
-              <option value="done">Done</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-          </div>
+              <hr className="border-gray-100" />
 
-          <div style={styles.sideSection}>
-            <div style={styles.sideLabel}>Priority</div>
-            <select
-              style={styles.sideSelect}
-              value={ticket.priority}
-              onChange={e => updateMutation.mutate({ priority: e.target.value })}
-            >
-              <option value="p0">P0 - Critical</option>
-              <option value="p1">P1 - High</option>
-              <option value="p2">P2 - Medium</option>
-              <option value="p3">P3 - Low</option>
-            </select>
-          </div>
-
-          <div style={styles.sideSection}>
-            <div style={styles.sideLabel}>Type</div>
-            <div style={styles.sideValue}>{ticket.type}</div>
-          </div>
-
-          <div style={styles.sideSection}>
-            <div style={styles.sideLabel}>Reporter</div>
-            <div style={styles.sideValue}>{ticket.reporter_name}</div>
-          </div>
-
-          <div style={styles.sideSection}>
-            <div style={styles.sideLabel}>Assignee</div>
-            <div style={styles.sideValue}>{ticket.assignee_name || 'Unassigned'}</div>
-          </div>
-
-          <div style={styles.sideSection}>
-            <div style={styles.sideLabel}>Created</div>
-            <div style={styles.sideValue}>
-              {new Date(ticket.created_at).toLocaleDateString()}
-            </div>
-          </div>
-
-          <div style={styles.sideSection}>
-            <div style={styles.sideLabel}>AI Embedding</div>
-            <div style={{
-              ...styles.sideValue,
-              color: ticket.has_embedding ? '#10B981' : '#F59E0B'
-            }}>
-              {ticket.has_embedding ? '✅ Ready' : '⏳ Pending'}
+              {/* AI Embedding */}
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">AI Embedding</label>
+                <div className={`text-xs px-2 py-1 rounded-lg font-medium inline-block ${
+                  ticket.has_embedding
+                    ? 'bg-green-50 text-green-600'
+                    : 'bg-yellow-50 text-yellow-600'
+                }`}>
+                  {ticket.has_embedding ? '✅ Ready for AI' : '⏳ Processing...'}
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
   )
-}
-
-const styles = {
-  container: { minHeight: '100vh', background: '#0d0f12' },
-  loading: { color: '#8b90a0', padding: '40px', textAlign: 'center' },
-  nav: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '0 24px', height: '52px', background: '#13161b',
-    borderBottom: '1px solid #252a33',
-  },
-  navLeft: { display: 'flex', alignItems: 'center', gap: '8px' },
-  navLogo: { color: '#e2e4e9', fontWeight: '700', fontSize: '16px', cursor: 'pointer' },
-  navSep: { color: '#252a33', fontSize: '18px' },
-  navLink: { color: '#8b90a0', fontSize: '14px', cursor: 'pointer' },
-  navCurrent: { color: '#e2e4e9', fontSize: '14px' },
-  layout: { display: 'flex', gap: '24px', padding: '24px', maxWidth: '1200px', margin: '0 auto' },
-  main: { flex: 1, display: 'flex', flexDirection: 'column', gap: '20px' },
-  sidebar: { width: '240px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '4px' },
-  ticketHeader: {
-    background: '#13161b', border: '1px solid #252a33',
-    borderRadius: '10px', padding: '24px',
-  },
-  ticketMeta: { display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' },
-  ticketKey: { color: '#555b6a', fontSize: '12px', fontWeight: '500' },
-  statusBadge: { fontSize: '11px', padding: '3px 8px', borderRadius: '4px', fontWeight: '500' },
-  priorityBadge: { fontSize: '11px', padding: '3px 8px', borderRadius: '4px', fontWeight: '500' },
-  ticketTitle: { color: '#e2e4e9', fontSize: '20px', fontWeight: '600', margin: '0 0 12px' },
-  ticketDesc: { color: '#8b90a0', fontSize: '14px', lineHeight: '1.6', margin: 0 },
-  aiSection: {
-    background: '#13161b', border: '1px solid #252a33',
-    borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px',
-  },
-  aiButtons: { display: 'flex', gap: '8px' },
-  aiBtn: {
-    background: '#1a1e25', border: '1px solid #252a33', borderRadius: '6px',
-    color: '#e2e4e9', padding: '8px 14px', fontSize: '13px', cursor: 'pointer',
-  },
-  aiOutput: {
-    background: '#0d1520', border: '1px solid #1e4070', borderRadius: '8px',
-    padding: '14px', position: 'relative',
-  },
-  aiOutputTitle: { color: '#3b8de0', fontSize: '12px', fontWeight: '600', marginBottom: '8px' },
-  aiOutputText: {
-    color: '#e2e4e9', fontSize: '13px', lineHeight: '1.6',
-    margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit',
-  },
-  aiClose: {
-    position: 'absolute', top: '10px', right: '10px',
-    background: 'transparent', border: 'none', color: '#555b6a',
-    cursor: 'pointer', fontSize: '14px',
-  },
-  section: {
-    background: '#13161b', border: '1px solid #252a33',
-    borderRadius: '10px', padding: '20px',
-  },
-  sectionTitle: { color: '#e2e4e9', fontSize: '14px', fontWeight: '600', margin: '0 0 16px' },
-  comment: { display: 'flex', gap: '12px', marginBottom: '16px' },
-  commentAvatar: {
-    width: '32px', height: '32px', borderRadius: '50%', background: '#3b8de0',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    color: '#fff', fontWeight: '600', fontSize: '13px', flexShrink: 0,
-  },
-  commentBody: { flex: 1 },
-  commentAuthor: { color: '#e2e4e9', fontSize: '13px', fontWeight: '500', marginBottom: '4px' },
-  edited: { color: '#555b6a', fontSize: '11px' },
-  commentText: { color: '#8b90a0', fontSize: '13px', lineHeight: '1.5' },
-  commentForm: { marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' },
-  commentInput: {
-    background: '#1a1e25', border: '1px solid #252a33', borderRadius: '8px',
-    padding: '10px 14px', color: '#e2e4e9', fontSize: '13px', outline: 'none',
-    fontFamily: 'inherit', resize: 'vertical',
-  },
-  commentBtn: {
-    alignSelf: 'flex-end', background: '#3b8de0', color: '#fff', border: 'none',
-    borderRadius: '6px', padding: '8px 16px', fontSize: '13px', fontWeight: '600', cursor: 'pointer',
-  },
-  historyItem: {
-    display: 'flex', alignItems: 'center', gap: '6px',
-    padding: '6px 0', borderBottom: '1px solid #1a1e25', fontSize: '12px',
-  },
-  historyActor: { color: '#e2e4e9', fontWeight: '500' },
-  historyText: { color: '#8b90a0', flex: 1 },
-  historyTime: { color: '#555b6a' },
-  sideSection: {
-    background: '#13161b', border: '1px solid #252a33',
-    borderRadius: '8px', padding: '12px 14px',
-  },
-  sideLabel: { color: '#555b6a', fontSize: '11px', fontWeight: '500', textTransform: 'uppercase', marginBottom: '6px' },
-  sideValue: { color: '#e2e4e9', fontSize: '13px' },
-  sideSelect: {
-    width: '100%', background: '#1a1e25', border: '1px solid #252a33',
-    borderRadius: '6px', padding: '6px 10px', color: '#e2e4e9',
-    fontSize: '13px', outline: 'none',
-  },
 }
