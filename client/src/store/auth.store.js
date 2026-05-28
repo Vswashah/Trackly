@@ -20,12 +20,19 @@ const useAuthStore = create((set) => ({
   },
 
   logout: async () => {
-    await api.post('/auth/logout');
+    try {
+      await api.post('/auth/logout');
+    } catch {}
     localStorage.removeItem('access_token');
-    set({ user: null });
+    set({ user: null, loading: false });
   },
 
   fetchMe: async () => {
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+      set({ user: null, loading: false });
+      return;
+    }
     try {
       const res = await api.get('/auth/me');
       set({ user: res.data, loading: false });
