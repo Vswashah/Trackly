@@ -33,6 +33,18 @@ db.query('SELECT NOW()').then(() => {
   console.error('❌ Database connection failed:', err);
 });
 
+// Auto-run migrations on startup
+const { execSync } = require('child_process');
+try {
+  console.log('🔄 Running migrations...');
+  execSync('node migrations/run.js', { 
+    stdio: 'inherit',
+    cwd: '/opt/render/project/src/server'
+  });
+} catch (err) {
+  console.error('❌ Migration error:', err.message);
+}
+
 app.use('/api/v1/auth', require('./routes/auth.routes'));
 app.use('/api/v1/projects/:projectId/tickets', require('./routes/ticket.routes'));
 app.use('/api/v1/tickets/:ticketId/comments', require('./routes/comment.routes'));
