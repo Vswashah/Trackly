@@ -35,11 +35,11 @@ db.query('SELECT NOW()').then(() => {
 
 // Auto-run migrations on startup
 const { execSync } = require('child_process');
+const path = require('path');
 try {
   console.log('🔄 Running migrations...');
-  execSync('node migrations/run.js', { 
-    stdio: 'inherit',
-    cwd: '/opt/render/project/src/server'
+  execSync(`node ${path.join(__dirname, '../migrations/run.js')}`, { 
+    stdio: 'inherit'
   });
 } catch (err) {
   console.error('❌ Migration error:', err.message);
