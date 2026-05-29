@@ -24,6 +24,7 @@ export default function ProjectBoard() {
   const [showFilter, setShowFilter] = useState(false)
   const [search, setSearch] = useState('')
   const [filterPriority, setFilterPriority] = useState('')
+  const [filterType, setFilterType] = useState('') 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState('p2')
@@ -108,7 +109,8 @@ export default function ProjectBoard() {
   const filteredTickets = tickets.filter(t => {
     const matchSearch = !search || t.title.toLowerCase().includes(search.toLowerCase())
     const matchPriority = !filterPriority || t.priority === filterPriority
-    return matchSearch && matchPriority
+    const matchType = !filterType || t.type === filterType
+    return matchSearch && matchPriority && matchType
   })
 
   return (
@@ -237,14 +239,31 @@ export default function ProjectBoard() {
               </div>
 
               <div className="mb-5">
-                <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Type</div>
-                {['Bug', 'Feature', 'Task', 'Chore'].map(t => (
-                  <label key={t} className="flex items-center gap-2 py-1.5 cursor-pointer group">
-                    <div className="w-4 h-4 rounded-full border-2 border-gray-300 group-hover:border-gray-400"></div>
-                    <span className="text-sm text-gray-700">{t}</span>
-                  </label>
-                ))}
-              </div>
+  <div className="flex items-center justify-between mb-2">
+    <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Type</span>
+    {filterType && (
+      <button onClick={() => setFilterType('')} className="text-xs text-blue-600">Clear</button>
+    )}
+  </div>
+  {['Bug', 'Feature', 'Task', 'Chore'].map(t => (
+    <label
+      key={t}
+      className="flex items-center gap-2 py-1.5 cursor-pointer group"
+      onClick={() => setFilterType(t.toLowerCase())}
+    >
+      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
+        filterType === t.toLowerCase()
+          ? 'border-gray-900 bg-gray-900'
+          : 'border-gray-300 group-hover:border-gray-400'
+      }`}>
+        {filterType === t.toLowerCase() && (
+          <div className="w-1.5 h-1.5 rounded-full bg-white"></div>
+        )}
+      </div>
+      <span className="text-sm text-gray-700">{t}</span>
+    </label>
+  ))}
+</div>
             </div>
           )}
         </div>
