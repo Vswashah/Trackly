@@ -31,6 +31,7 @@ app.use('/api/v1/auth', require('./routes/auth.routes'));
 app.use('/api/v1/projects/:projectId/tickets', require('./routes/ticket.routes'));
 app.use('/api/v1/tickets/:ticketId/comments', require('./routes/comment.routes'));
 app.use('/api/v1/ai', require('./routes/ai.routes'));
+app.use('/api/v1/projects', require('./routes/project.routes'));
 
 // Health check
 app.get('/health', (req, res) => {
