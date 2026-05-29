@@ -2,7 +2,6 @@ import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import useAuthStore from './store/auth.store'
 
-// Pages
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
@@ -11,7 +10,18 @@ import TicketDetail from './pages/TicketDetail'
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuthStore()
-  if (loading) return <div className="loading">Loading...</div>
+  if (loading) return (
+    <div style={{
+      minHeight: '100vh',
+      background: '#f8f9fa',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: '#888'
+    }}>
+      Loading...
+    </div>
+  )
   if (!user) return <Navigate to="/login" replace />
   return children
 }

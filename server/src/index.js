@@ -1,11 +1,11 @@
 require('dotenv').config();
-const { startEmbeddingWorker } = require('./jobs/embedding.worker');
-const db = require('./config/db');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
+const { execSync } = require('child_process');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,19 +26,13 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
 
-// Test DB connection
-db.query('SELECT NOW()').then(() => {
-  console.log('✅ Database connection verified');
-}).catch(err => {
-  console.error('❌ Database connection failed:', err);
-});
-
+// Routes
 app.use('/api/v1/auth', require('./routes/auth.routes'));
 app.use('/api/v1/projects/:projectId/tickets', require('./routes/ticket.routes'));
 app.use('/api/v1/tickets/:ticketId/comments', require('./routes/comment.routes'));
 app.use('/api/v1/ai', require('./routes/ai.routes'));
 
-// Health check route
+// Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Trackly API is running' });
 });
@@ -56,10 +50,28 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Trackly server running on port ${PORT}`);
-});
+async function start() {
+  // Run migrations first
+  try {
+    console.log('🔄 Running migrations...');
+    execSync(`node ${path.join(__dirname, '../migrations/run.js')}`, {
+      stdio: 'inherit'
+    });
+    console.log('✅ Migrations complete');
+  } catch (err) {
+    console.error('❌ Migration error:', err.message);
+  }
 
-startEmbeddingWorker();
+  // Start server
+  app.listen(PORT, () => {
+    console.log(`🚀 Trackly server running on port ${PORT}`);
+  });
+
+  // Start embedding worker after migrations
+  const { startEmbeddingWorker } = require('./jobs/embedding.worker');
+  startEmbeddingWorker();
+}
+
+start();
 
 module.exports = app;

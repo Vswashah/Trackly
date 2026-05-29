@@ -1,9 +1,12 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, Filter, Plus, MoreHorizontal, MessageSquare, X } from 'lucide-react'
+import { DndContext, DragOverlay, closestCenter } from '@dnd-kit/core'
+import { Search, Filter, Plus, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Sidebar from '../components/Sidebar'
+import KanbanColumn from '../components/KanbanColumn'
+import TicketCard from '../components/TicketCard'
 import api from '../lib/api'
 
 const STATUSES = [
@@ -11,21 +14,6 @@ const STATUSES = [
   { code: 'in_progress', label: 'In Progress', color: '#3B82F6', bg: 'bg-blue-100' },
   { code: 'in_review', label: 'In Review', color: '#F59E0B', bg: 'bg-yellow-100' },
   { code: 'done', label: 'Done', color: '#10B981', bg: 'bg-green-100' },
-]
-
-const PRIORITY_STYLES = {
-  p0: 'bg-red-50 text-red-600 border border-red-200',
-  p1: 'bg-orange-50 text-orange-600 border border-orange-200',
-  p2: 'bg-blue-50 text-blue-600 border border-blue-200',
-  p3: 'bg-gray-100 text-gray-500 border border-gray-200',
-}
-
-const LABEL_COLORS = [
-  'bg-blue-100 text-blue-700',
-  'bg-green-100 text-green-700',
-  'bg-orange-100 text-orange-700',
-  'bg-purple-100 text-purple-700',
-  'bg-red-100 text-red-700',
 ]
 
 export default function ProjectBoard() {
@@ -42,6 +30,7 @@ export default function ProjectBoard() {
   const [type, setType] = useState('task')
   const [similar, setSimilar] = useState([])
   const [checkingDupe, setCheckingDupe] = useState(false)
+  const [activeTicket, setActiveTicket] = useState(null)
 
   const { data: tickets = [], isLoading } = useQuery({
     queryKey: ['tickets', projectId],
@@ -67,6 +56,16 @@ export default function ProjectBoard() {
     onError: (err) => toast.error(err.response?.data?.error || 'Failed'),
   })
 
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ ticketKey, status }) => {
+      await api.patch(`/projects/${projectId}/tickets/${ticketKey}`, { status })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['tickets', projectId])
+    },
+    onError: () => toast.error('Failed to update status'),
+  })
+
   const checkSimilar = async (text) => {
     if (text.length < 10) { setSimilar([]); return }
     setCheckingDupe(true)
@@ -77,13 +76,40 @@ export default function ProjectBoard() {
     finally { setCheckingDupe(false) }
   }
 
+  const handleDragStart = (event) => {
+    setActiveTicket(event.active.data.current.ticket)
+  }
+
+  const handleDragEnd = (event) => {
+    const { active, over } = event
+    setActiveTicket(null)
+
+    if (!over) return
+
+    const ticket = active.data.current.ticket
+    const newStatus = over.id
+
+    if (ticket.status === newStatus) return
+
+    // Optimistic update
+    queryClient.setQueryData(['tickets', projectId], (old) => {
+      if (!old) return old
+      return old.map(t =>
+        t.id === ticket.id ? { ...t, status: newStatus } : t
+      )
+    })
+
+    updateStatusMutation.mutate({
+      ticketKey: ticket.ticket_key,
+      status: newStatus,
+    })
+  }
+
   const filteredTickets = tickets.filter(t => {
     const matchSearch = !search || t.title.toLowerCase().includes(search.toLowerCase())
     const matchPriority = !filterPriority || t.priority === filterPriority
     return matchSearch && matchPriority
   })
-
-  const ticketsByStatus = (code) => filteredTickets.filter(t => t.status === code)
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -103,10 +129,9 @@ export default function ProjectBoard() {
             </button>
           </div>
 
-          {/* Tabs + Search */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1 border-b border-transparent">
-              {['List', 'Board', 'Timeline', 'Calendar'].map((tab, i) => (
+            <div className="flex items-center gap-1">
+              {['List', 'Board', 'Timeline', 'Calendar'].map((tab) => (
                 <button key={tab} className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
                   tab === 'Board'
                     ? 'text-gray-900 font-medium border-b-2 border-gray-900'
@@ -143,96 +168,30 @@ export default function ProjectBoard() {
         <div className="flex flex-1 overflow-hidden">
           {/* Board */}
           <div className="flex-1 p-6 overflow-x-auto">
-            <div className="flex gap-4 min-w-max">
-              {STATUSES.map(status => (
-                <div key={status.code} className="w-72">
-                  {/* Column header */}
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-gray-700">{status.label}</span>
-                      <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
-                        {ticketsByStatus(status.code).length}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => setShowNewTicket(true)}
-                        className="text-gray-400 hover:text-gray-600 p-1 rounded"
-                      >
-                        <Plus size={14} />
-                      </button>
-                      <button className="text-gray-400 hover:text-gray-600 p-1 rounded">
-                        <MoreHorizontal size={14} />
-                      </button>
-                    </div>
+            <DndContext
+              collisionDetection={closestCenter}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+            >
+              <div className="flex gap-4 min-w-max">
+                {STATUSES.map(status => (
+                  <KanbanColumn
+                    key={status.code}
+                    status={status}
+                    tickets={filteredTickets.filter(t => t.status === status.code)}
+                    onNewTicket={() => setShowNewTicket(true)}
+                  />
+                ))}
+              </div>
+
+              <DragOverlay>
+                {activeTicket ? (
+                  <div className="rotate-2 opacity-90">
+                    <TicketCard ticket={activeTicket} index={0} />
                   </div>
-
-                  {/* Cards */}
-                  <div className="space-y-2">
-                    {isLoading ? (
-                      <div className="bg-white rounded-xl border border-gray-200 p-4 animate-pulse">
-                        <div className="h-3 bg-gray-100 rounded mb-2 w-3/4"></div>
-                        <div className="h-3 bg-gray-100 rounded w-1/2"></div>
-                      </div>
-                    ) : (
-                      ticketsByStatus(status.code).map((ticket, idx) => (
-                        <div
-                          key={ticket.id}
-                          className="bg-white rounded-xl border border-gray-200 p-4 cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all group"
-                          onClick={() => navigate(`/projects/${projectId}/tickets/${ticket.ticket_key}`)}
-                        >
-                          {/* Labels row */}
-                          <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_STYLES[ticket.priority]}`}>
-                              {ticket.priority?.toUpperCase()}
-                            </span>
-                            <span className={`text-xs px-2 py-0.5 rounded-full ${LABEL_COLORS[idx % LABEL_COLORS.length]}`}>
-                              {ticket.type}
-                            </span>
-                          </div>
-
-                          {/* Title */}
-                          <div className="text-sm font-medium text-gray-900 mb-1 leading-snug">
-                            {ticket.title}
-                          </div>
-
-                          {/* Company / project */}
-                          <div className="flex items-center gap-1 mb-3">
-                            <div className="w-3.5 h-3.5 bg-gray-200 rounded-sm"></div>
-                            <span className="text-xs text-gray-400">Trackly App</span>
-                          </div>
-
-                          {/* Footer */}
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1">
-                              <div className="w-6 h-6 rounded-full bg-indigo-500 flex items-center justify-center text-white text-xs font-medium">
-                                V
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-gray-400">
-                              <span>{new Date(ticket.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                              <div className="flex items-center gap-0.5">
-                                <MessageSquare size={11} />
-                                <span>0</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    )}
-
-                    {/* Add task button */}
-                    <button
-                      onClick={() => setShowNewTicket(true)}
-                      className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:text-gray-600 hover:bg-white rounded-lg border border-dashed border-transparent hover:border-gray-200 transition-all flex items-center gap-2"
-                    >
-                      <Plus size={14} />
-                      Add Task
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
           </div>
 
           {/* Filter Panel */}
@@ -245,14 +204,11 @@ export default function ProjectBoard() {
                 </button>
               </div>
 
-              {/* Priority filter */}
               <div className="mb-5">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Priority</span>
                   {filterPriority && (
-                    <button onClick={() => setFilterPriority('')} className="text-xs text-blue-600 hover:text-blue-700">
-                      Clear
-                    </button>
+                    <button onClick={() => setFilterPriority('')} className="text-xs text-blue-600">Clear</button>
                   )}
                 </div>
                 {[
@@ -261,7 +217,11 @@ export default function ProjectBoard() {
                   { value: 'p2', label: 'Medium' },
                   { value: 'p3', label: 'Low' },
                 ].map(p => (
-                  <label key={p.value} className="flex items-center gap-2 py-1.5 cursor-pointer group">
+                  <label
+                    key={p.value}
+                    className="flex items-center gap-2 py-1.5 cursor-pointer group"
+                    onClick={() => setFilterPriority(p.value)}
+                  >
                     <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
                       filterPriority === p.value
                         ? 'border-gray-900 bg-gray-900'
@@ -276,7 +236,6 @@ export default function ProjectBoard() {
                 ))}
               </div>
 
-              {/* Type filter */}
               <div className="mb-5">
                 <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Type</div>
                 {['Bug', 'Feature', 'Task', 'Chore'].map(t => (
@@ -306,7 +265,6 @@ export default function ProjectBoard() {
             </div>
 
             <div className="p-5 space-y-4">
-              {/* Title */}
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Title</label>
                 <input
@@ -322,10 +280,7 @@ export default function ProjectBoard() {
                 />
               </div>
 
-              {/* Duplicate warning */}
-              {checkingDupe && (
-                <p className="text-xs text-gray-400">Checking for duplicates...</p>
-              )}
+              {checkingDupe && <p className="text-xs text-gray-400">Checking for duplicates...</p>}
               {similar.length > 0 && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                   <p className="text-xs font-medium text-amber-700 mb-2">⚠️ Similar tickets found</p>
@@ -339,7 +294,6 @@ export default function ProjectBoard() {
                 </div>
               )}
 
-              {/* Description */}
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Description</label>
                 <textarea
@@ -351,7 +305,6 @@ export default function ProjectBoard() {
                 />
               </div>
 
-              {/* Priority + Type */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-gray-500 mb-1 block">Priority</label>
