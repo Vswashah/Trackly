@@ -7,6 +7,7 @@ import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import ProjectBoard from './pages/ProjectBoard'
 import TicketDetail from './pages/TicketDetail'
+import AuthCallback from './pages/AuthCallback'
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuthStore()
@@ -30,13 +31,15 @@ export default function App() {
   const { fetchMe } = useAuthStore()
 
   useEffect(() => {
+  if (window.location.pathname !== '/auth/callback') {
     fetchMe()
-  }, [])
-
+  }
+}, [])
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/" element={
         <ProtectedRoute>
           <Dashboard />

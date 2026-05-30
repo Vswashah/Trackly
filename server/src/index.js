@@ -6,6 +6,7 @@ const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
 const { execSync } = require('child_process');
 const path = require('path');
+const passport = require('./config/passport');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -25,12 +26,16 @@ app.use(morgan('dev'));
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
+app.use(passport.initialize());
 
 // Routes
 app.use('/api/v1/auth', require('./routes/auth.routes'));
+app.use('/api/v1/projects', require('./routes/project.routes'));
 app.use('/api/v1/projects/:projectId/tickets', require('./routes/ticket.routes'));
 app.use('/api/v1/tickets/:ticketId/comments', require('./routes/comment.routes'));
 app.use('/api/v1/ai', require('./routes/ai.routes'));
+
+
 
 // Health check
 app.get('/health', (req, res) => {

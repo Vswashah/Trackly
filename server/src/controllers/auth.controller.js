@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+
 const db = require('../config/db');
 
 const generateTokens = (user) => {
@@ -60,10 +61,10 @@ exports.register = async (req, res) => {
     const user = userRes.rows[0];
 
     // Create user preferences
-    await db.query(
-      `INSERT INTO user_preferences (id, user_id) VALUES ($1, $2)`,
-      [uuidv4(), user.id]
-    );
+await db.query(
+  `INSERT INTO user_preferences (id, user_id) VALUES ($1, $2)`,
+  [uuidv4(), user.id]
+);
 
     // Generate tokens
     const { accessToken, refreshToken } = generateTokens({ ...user, role_code: 'member' });
