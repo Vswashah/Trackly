@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { DndContext, DragOverlay, closestCenter } from '@dnd-kit/core'
-import { Search, Filter, Plus, X } from 'lucide-react'
+import { Search, Filter, Plus, X, Users } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Sidebar from '../components/Sidebar'
 import KanbanColumn from '../components/KanbanColumn'
 import TicketCard from '../components/TicketCard'
 import api from '../lib/api'
+import MembersModal from '../components/MembersModal'
 
 const STATUSES = [
   { code: 'open', label: 'Todo', color: '#6B7280', bg: 'bg-gray-100' },
@@ -32,6 +33,7 @@ export default function ProjectBoard() {
   const [similar, setSimilar] = useState([])
   const [checkingDupe, setCheckingDupe] = useState(false)
   const [activeTicket, setActiveTicket] = useState(null)
+  const [showMembers, setShowMembers] = useState(false)
 
   const { data: tickets = [], isLoading } = useQuery({
     queryKey: ['tickets', projectId],
@@ -275,12 +277,22 @@ export default function ProjectBoard() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">
               <h2 className="font-semibold text-gray-900">New Ticket</h2>
-              <button
-                onClick={() => { setShowNewTicket(false); setSimilar([]); setTitle('') }}
-                className="text-gray-400 hover:text-gray-600 p-1"
-              >
-                <X size={18} />
-              </button>
+              <div className="flex items-center gap-2">
+  <button
+    onClick={() => setShowMembers(true)}
+    className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+  >
+    <Users size={15} />
+    Members
+  </button>
+  <button
+    onClick={() => setShowNewTicket(true)}
+    className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
+  >
+    <Plus size={15} />
+    New
+  </button>
+</div>
             </div>
 
             <div className="p-5 space-y-4">
@@ -371,7 +383,14 @@ export default function ProjectBoard() {
             </div>
           </div>
         </div>
+        
       )}
+      {showMembers && (
+  <MembersModal
+    projectId={projectId}
+    onClose={() => setShowMembers(false)}
+  />
+)}
     </div>
   )
 }
