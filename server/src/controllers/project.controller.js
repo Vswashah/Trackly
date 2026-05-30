@@ -59,3 +59,71 @@ exports.createProject = async (req, res) => {
     return res.status(500).json({ error: 'Internal server error' })
   }
 }
+
+exports.inviteMember = async (req, res) => {
+  const { projectId } = req.params
+  const { email, role = 'member' } = req.body
+
+  if (!email) return res.status(400).json({ error: 'email is required' })
+
+  try {
+    // Find user by email
+    const userRes = await db.query(
+      `SELECT id, full_name, email FROM users WHERE email = $1 AND deleted_at IS NULL`,
+      [email.toLowerCase().trim()]
+    )
+
+    if (!userRes.rows.length) {
+      return res.status(404).json({ error: 'No user found with that email. They need to register first.' })
+    }
+
+    const invitee = userRes.rows[0]
+
+    // Check if already a member
+    const existing = await db.query(
+      `SELECT id FROM map_project_members 
+       WHERE project_id = $1 AND user_id = $2 AND is_active = true`,
+      [projectId, invitee.id]
+    )
+
+    if (existing.rows.length) {
+      return res.status(409).json({ error: 'User is already a member of this project' })
+    }
+
+    // Add member
+    await db.query(
+      `INSERT INTO map_project_members (id, project_id, user_id, role_id, joined_at)
+       VALUES ($1, $2, $3, (SELECT id FROM mst_roles WHERE code = $4), NOW())`,
+      [uuidv4(), projectId, invitee.id, role]
+    )
+
+    return res.status(201).json({
+      message: `${invitee.full_name} added to project`,
+      user: { id: invitee.id, full_name: invitee.full_name, email: invitee.email, role }
+    })
+  } catch (err) {
+    console.error('Invite member error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
+exports.listMembers = async (req, res) => {
+  const { projectId } = req.params
+
+  try {
+    const result = await db.query(
+      `SELECT u.id, u.full_name, u.email, u.avatar_url,
+              r.code as role, mpm.joined_at
+       FROM map_project_members mpm
+       JOIN users u ON u.id = mpm.user_id
+       JOIN mst_roles r ON r.id = mpm.role_id
+       WHERE mpm.project_id = $1 AND mpm.is_active = true
+       ORDER BY mpm.joined_at ASC`,
+      [projectId]
+    )
+    return res.status(200).json(result.rows)
+  } catch (err) {
+    console.error('List members error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+}
