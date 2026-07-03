@@ -90,11 +90,33 @@ export default function TicketCard({ ticket, index }) {
 
       {/* Footer */}
       <div className="flex items-center justify-between">
-        <div className="w-6 h-6 rounded-full bg-indigo-500 flex items-center 
-          justify-center text-white text-xs font-medium">
-          V
-        </div>
+        {ticket.assignee_avatar ? (
+          <img
+            src={ticket.assignee_avatar}
+            alt={ticket.assignee_name}
+            className="w-6 h-6 rounded-full object-cover"
+          />
+        ) : ticket.assignee_name ? (
+          <div className="w-6 h-6 rounded-full bg-indigo-500 flex items-center 
+            justify-center text-white text-xs font-medium">
+            {ticket.assignee_name.charAt(0).toUpperCase()}
+          </div>
+        ) : (
+          <div className="w-6 h-6 rounded-full bg-gray-200"></div>
+        )}
         <div className="flex items-center gap-2 text-xs text-gray-400">
+          {ticket.due_date && (
+            <span className={`px-1.5 py-0.5 rounded-full font-medium ${
+              new Date(ticket.due_date) < new Date().setHours(0, 0, 0, 0) &&
+              !['done', 'cancelled'].includes(ticket.status)
+                ? 'bg-red-50 text-red-600 border border-red-200'
+                : 'bg-gray-100 text-gray-500 border border-gray-200'
+            }`}>
+              {new Date(ticket.due_date).toLocaleDateString('en-US', {
+                month: 'short', day: 'numeric'
+              })}
+            </span>
+          )}
           <span>
             {new Date(ticket.created_at).toLocaleDateString('en-US', { 
               month: 'short', day: 'numeric' 

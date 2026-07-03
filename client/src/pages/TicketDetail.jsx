@@ -40,6 +40,14 @@ export default function TicketDetail() {
     }
   })
 
+  const { data: members = [] } = useQuery({
+    queryKey: ['members', projectId],
+    queryFn: async () => {
+      const res = await api.get(`/projects/${projectId}/members`)
+      return res.data
+    }
+  })
+
   const updateMutation = useMutation({
     mutationFn: async (updates) => {
       await api.patch(`/projects/${projectId}/tickets/${ticketKey}`, updates)
@@ -342,12 +350,29 @@ export default function TicketDetail() {
               </div>
 
               {/* Assignee */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                  <User size={12} />
-                  Assignee
-                </div>
-                <span className="text-xs text-gray-700">{ticket.assignee_name || 'Unassigned'}</span>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Assignee</label>
+                <select
+                  className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-gray-400 bg-white"
+                  value={ticket.assignee_id || ''}
+                  onChange={e => updateMutation.mutate({ assignee_id: e.target.value || null })}
+                >
+                  <option value="">Unassigned</option>
+                  {members.map(m => (
+                    <option key={m.id} value={m.id}>{m.full_name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Due date */}
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Due date</label>
+                <input
+                  type="date"
+                  className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-gray-400 bg-white"
+                  value={ticket.due_date ? ticket.due_date.slice(0, 10) : ''}
+                  onChange={e => updateMutation.mutate({ due_date: e.target.value || null })}
+                />
               </div>
 
               {/* Created */}

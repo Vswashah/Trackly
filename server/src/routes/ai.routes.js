@@ -7,6 +7,7 @@ const {
   summarize,
   suggestPriority,
   submitFeedback,
+  searchTickets,
 } = require('../ai/ai.controller');
 
 router.use(auth);
@@ -16,5 +17,6 @@ router.get('/hints/:ticketId', getHints);
 router.post('/summarize/:ticketId', summarize);
 router.post('/suggest-priority', suggestPriority);
 router.post('/feedback/:interactionId', submitFeedback);
+router.post('/search', searchTickets);
 
 module.exports = router;

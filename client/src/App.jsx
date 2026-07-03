@@ -7,6 +7,7 @@ import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import ProjectBoard from './pages/ProjectBoard'
 import TicketDetail from './pages/TicketDetail'
+import Analytics from './pages/Analytics'
 import AuthCallback from './pages/AuthCallback'
 
 const ProtectedRoute = ({ children }) => {
@@ -53,6 +54,11 @@ export default function App() {
       <Route path="/projects/:projectId/tickets/:ticketKey" element={
         <ProtectedRoute>
           <TicketDetail />
+        </ProtectedRoute>
+      } />
+      <Route path="/projects/:projectId/analytics" element={
+        <ProtectedRoute>
+          <Analytics />
         </ProtectedRoute>
       } />
       <Route path="*" element={<Navigate to="/" replace />} />

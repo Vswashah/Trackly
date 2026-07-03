@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { DndContext, DragOverlay, closestCenter } from '@dnd-kit/core'
-import { Search, Filter, Plus, X, Users } from 'lucide-react'
+import { Search, Filter, Plus, X, Users, Sparkles, BarChart3 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Sidebar from '../components/Sidebar'
 import KanbanColumn from '../components/KanbanColumn'
@@ -30,10 +30,14 @@ export default function ProjectBoard() {
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState('p2')
   const [type, setType] = useState('task')
+  const [dueDate, setDueDate] = useState('')
   const [similar, setSimilar] = useState([])
   const [checkingDupe, setCheckingDupe] = useState(false)
   const [activeTicket, setActiveTicket] = useState(null)
   const [showMembers, setShowMembers] = useState(false)
+  const [aiQuery, setAiQuery] = useState('')
+  const [aiResults, setAiResults] = useState(null)
+  const [aiSearching, setAiSearching] = useState(false)
 
   const { data: tickets = [], isLoading } = useQuery({
     queryKey: ['tickets', projectId],
@@ -54,6 +58,7 @@ export default function ProjectBoard() {
       setShowNewTicket(false)
       setTitle('')
       setDescription('')
+      setDueDate('')
       setSimilar([])
     },
     onError: (err) => toast.error(err.response?.data?.error || 'Failed'),
@@ -77,6 +82,20 @@ export default function ProjectBoard() {
       setSimilar(res.data.similar || [])
     } catch { setSimilar([]) }
     finally { setCheckingDupe(false) }
+  }
+
+  const runAiSearch = async () => {
+    if (!aiQuery.trim()) return
+    setAiSearching(true)
+    try {
+      const res = await api.post('/ai/search', { query: aiQuery, project_id: projectId })
+      setAiResults(res.data.results || [])
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'AI search failed')
+      setAiResults(null)
+    } finally {
+      setAiSearching(false)
+    }
   }
 
   const handleDragStart = (event) => {
@@ -124,13 +143,22 @@ export default function ProjectBoard() {
         <div className="bg-white border-b border-gray-200 px-6 py-4">
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-xl font-semibold text-gray-900">Tickets</h1>
-            <button
-              onClick={() => setShowNewTicket(true)}
-              className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
-            >
-              <Plus size={15} />
-              New
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate(`/projects/${projectId}/analytics`)}
+                className="flex items-center gap-2 border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+              >
+                <BarChart3 size={15} />
+                Analytics
+              </button>
+              <button
+                onClick={() => setShowNewTicket(true)}
+                className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
+              >
+                <Plus size={15} />
+                New
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center justify-between">
@@ -147,6 +175,43 @@ export default function ProjectBoard() {
             </div>
 
             <div className="flex items-center gap-2">
+              <div className="relative">
+                <Sparkles size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-500" />
+                <input
+                  className="pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-gray-400 w-64"
+                  placeholder="AI search — e.g. 'critical login bugs'"
+                  value={aiQuery}
+                  onChange={e => setAiQuery(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') runAiSearch() }}
+                />
+                {(aiSearching || aiResults !== null) && (
+                  <div className="absolute right-0 mt-2 w-96 bg-white border border-gray-200 rounded-lg shadow-lg z-40 max-h-80 overflow-y-auto">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
+                      <span className="text-xs font-medium text-gray-500">AI Search Results</span>
+                      <button onClick={() => { setAiResults(null); setAiQuery('') }} className="text-gray-400 hover:text-gray-600">
+                        <X size={14} />
+                      </button>
+                    </div>
+                    {aiSearching ? (
+                      <p className="text-sm text-gray-400 px-3 py-4">Searching...</p>
+                    ) : aiResults?.length ? (
+                      aiResults.map(r => (
+                        <div
+                          key={r.ticket_key}
+                          onClick={() => navigate(`/projects/${projectId}/tickets/${r.ticket_key}`)}
+                          className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-50 border-b border-gray-50 last:border-0"
+                        >
+                          <span className="font-mono text-xs font-medium text-gray-500">{r.ticket_key}</span>
+                          <span className="flex-1 truncate text-sm text-gray-800">{r.title}</span>
+                          <span className="text-xs font-medium text-gray-400">{Math.round(r.similarity * 100)}%</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-400 px-3 py-4">No matching tickets found.</p>
+                    )}
+                  </div>
+                )}
+              </div>
               <div className="relative">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
@@ -364,17 +429,27 @@ export default function ProjectBoard() {
                   </select>
                 </div>
               </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Due date</label>
+                <input
+                  type="date"
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-gray-400 bg-white"
+                  value={dueDate}
+                  onChange={e => setDueDate(e.target.value)}
+                />
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-gray-100">
               <button
-                onClick={() => { setShowNewTicket(false); setSimilar([]); setTitle('') }}
+                onClick={() => { setShowNewTicket(false); setSimilar([]); setTitle(''); setDueDate('') }}
                 className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={() => createMutation.mutate({ title, description, priority, type })}
+                onClick={() => createMutation.mutate({ title, description, priority, type, due_date: dueDate || null })}
                 disabled={!title.trim() || createMutation.isPending}
                 className="px-4 py-2 text-sm bg-black text-white rounded-lg font-medium hover:bg-gray-800 disabled:opacity-50 transition-colors"
               >
