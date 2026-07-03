@@ -241,6 +241,80 @@ Respond ONLY with valid JSON, no markdown, no explanation:
   }
 };
 
+// ── POST /ai/search ───────────────────────────────────────────────
+exports.searchTickets = async (req, res) => {
+  const { query, project_id } = req.body;
+  if (!query) return res.status(400).json({ error: 'query is required' });
+  if (!project_id) return res.status(400).json({ error: 'project_id is required' });
+
+  try {
+    const prompt = `You parse a natural language ticket search query into structured filters.
+
+Query: "${query}"
+
+Respond ONLY with valid JSON, no markdown, no explanation:
+{"priority": "p1"|null, "status": "open"|"in_progress"|"in_review"|"done"|"cancelled"|null, "type": "bug"|"feature"|"task"|"chore"|null, "semantic_query": "the core search phrase"}`;
+
+    const raw = await llm(prompt);
+    const cleaned = raw.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+
+    const embedding = await generateEmbedding(parsed.semantic_query || query);
+    const vectorStr = `[${embedding.join(',')}]`;
+
+    const params = [vectorStr, project_id];
+    const conditions = [
+      't.project_id = $2',
+      't.embedding IS NOT NULL',
+      't.is_deleted = false',
+    ];
+
+    if (parsed.status) {
+      params.push(parsed.status);
+      conditions.push(`s.code = $${params.length}`);
+    }
+    if (parsed.priority) {
+      params.push(parsed.priority);
+      conditions.push(`p.code = $${params.length}`);
+    }
+    if (parsed.type) {
+      params.push(parsed.type);
+      conditions.push(`ty.code = $${params.length}`);
+    }
+
+    const result = await db.query(
+      `SELECT t.ticket_key, t.title, t.description,
+              s.code as status, p.code as priority,
+              a.full_name as assignee_name,
+              1 - (t.embedding <=> $1::vector) as similarity
+       FROM tickets t
+       LEFT JOIN mst_ticket_status s ON s.id = t.status_id
+       LEFT JOIN mst_ticket_priority p ON p.id = t.priority_id
+       LEFT JOIN mst_ticket_type ty ON ty.id = t.type_id
+       LEFT JOIN users a ON a.id = t.assignee_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY t.embedding <=> $1::vector
+       LIMIT 10`,
+      params
+    );
+
+    await db.query(
+      `INSERT INTO ai_interactions
+        (id, user_id, interaction_type, input_text, output_text, tokens_used)
+       VALUES ($1, $2, 'nl_search', $3, $4, $5)`,
+      [uuidv4(), req.user.id, query, raw, Math.ceil(query.length / 4)]
+    );
+
+    return res.status(200).json({
+      results: result.rows,
+      parsed_filters: parsed,
+    });
+  } catch (err) {
+    console.error('Search tickets error:', err);
+    return res.status(503).json({ error: 'AI service unavailable', detail: err.message });
+  }
+};
+
 // ── POST /ai/feedback/:interactionId ─────────────────────────────
 exports.submitFeedback = async (req, res) => {
   const { interactionId } = req.params;
