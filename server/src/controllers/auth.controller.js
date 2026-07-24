@@ -185,6 +185,138 @@ exports.me = async (req, res) => {
   }
 };
 
+// PATCH /auth/me
+exports.updateProfile = async (req, res) => {
+  const { full_name, avatar_url, timezone } = req.body;
+
+  const updates = [];
+  const params = [];
+  let idx = 1;
+
+  if (full_name !== undefined) {
+    if (!full_name.trim()) return res.status(400).json({ error: 'full_name cannot be empty' });
+    updates.push(`full_name = $${idx++}`);
+    params.push(full_name.trim());
+  }
+  if (avatar_url !== undefined) {
+    updates.push(`avatar_url = $${idx++}`);
+    params.push(avatar_url || null);
+  }
+  if (timezone !== undefined) {
+    updates.push(`timezone = $${idx++}`);
+    params.push(timezone);
+  }
+
+  if (!updates.length) {
+    return res.status(400).json({ error: 'No fields to update' });
+  }
+
+  updates.push(`updated_at = NOW()`);
+
+  try {
+    const result = await db.query(
+      `UPDATE users SET ${updates.join(', ')} WHERE id = $${idx} AND deleted_at IS NULL
+       RETURNING id, email, full_name, avatar_url, timezone`,
+      [...params, req.user.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'User not found' });
+    return res.status(200).json(result.rows[0]);
+  } catch (err) {
+    console.error('Update profile error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// PATCH /auth/preferences
+exports.updatePreferences = async (req, res) => {
+  const { theme, default_project_view, email_notifications, in_app_notifications } = req.body;
+
+  const updates = [];
+  const params = [];
+  let idx = 1;
+
+  if (theme !== undefined) {
+    if (!['light', 'dark'].includes(theme)) return res.status(400).json({ error: 'Invalid theme' });
+    updates.push(`theme = $${idx++}`);
+    params.push(theme);
+  }
+  if (default_project_view !== undefined) {
+    if (!['kanban', 'list'].includes(default_project_view)) {
+      return res.status(400).json({ error: 'Invalid default_project_view' });
+    }
+    updates.push(`default_project_view = $${idx++}`);
+    params.push(default_project_view);
+  }
+  if (email_notifications !== undefined) {
+    updates.push(`email_notifications = $${idx++}`);
+    params.push(!!email_notifications);
+  }
+  if (in_app_notifications !== undefined) {
+    updates.push(`in_app_notifications = $${idx++}`);
+    params.push(!!in_app_notifications);
+  }
+
+  if (!updates.length) {
+    return res.status(400).json({ error: 'No fields to update' });
+  }
+
+  updates.push(`updated_at = NOW()`);
+
+  try {
+    const result = await db.query(
+      `UPDATE user_preferences SET ${updates.join(', ')} WHERE user_id = $${idx}
+       RETURNING theme, default_project_view, email_notifications, in_app_notifications`,
+      [...params, req.user.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Preferences not found' });
+    return res.status(200).json(result.rows[0]);
+  } catch (err) {
+    console.error('Update preferences error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// POST /auth/change-password
+exports.changePassword = async (req, res) => {
+  const { current_password, new_password } = req.body;
+
+  if (!current_password || !new_password) {
+    return res.status(400).json({ error: 'current_password and new_password are required' });
+  }
+  if (new_password.length < 8) {
+    return res.status(400).json({ error: 'New password must be at least 8 characters' });
+  }
+
+  try {
+    const userRes = await db.query(
+      `SELECT id, password_hash FROM users WHERE id = $1 AND deleted_at IS NULL`,
+      [req.user.id]
+    );
+    const user = userRes.rows[0];
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const valid = await bcrypt.compare(current_password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
+
+    const newHash = await bcrypt.hash(new_password, 12);
+    await db.query(
+      `UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`,
+      [newHash, user.id]
+    );
+
+    // Revoke all existing sessions so other devices must re-authenticate
+    await db.query(
+      `UPDATE user_sessions SET is_revoked = true WHERE user_id = $1 AND is_revoked = false`,
+      [user.id]
+    );
+
+    return res.status(200).json({ message: 'Password updated' });
+  } catch (err) {
+    console.error('Change password error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 // POST /auth/refresh
 exports.refresh = async (req, res) => {
   const refreshToken = req.cookies?.refresh_token;

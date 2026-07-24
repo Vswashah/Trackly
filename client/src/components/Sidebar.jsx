@@ -1,5 +1,7 @@
 import { useNavigate, useLocation } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import useAuthStore from '../store/auth.store'
+import api from '../lib/api'
 import {
   LayoutDashboard, Bell, FolderKanban, CheckSquare,
   Users, Calendar, HelpCircle, Settings, LogOut
@@ -7,7 +9,7 @@ import {
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Overview', path: '/' },
-  { icon: Bell, label: 'Notifications', path: '/notifications' },
+  { icon: Bell, label: 'Notifications', path: '/notifications', badge: true },
   { icon: FolderKanban, label: 'Projects', path: '/' },
   { icon: CheckSquare, label: 'Tickets', path: '/tickets' },
   { icon: Users, label: 'Team Members', path: '/team' },
@@ -23,6 +25,15 @@ export default function Sidebar() {
   const { user, logout } = useAuthStore()
   const navigate = useNavigate()
   const location = useLocation()
+
+  const { data: unreadCount = 0 } = useQuery({
+    queryKey: ['notifications-unread-count'],
+    queryFn: async () => {
+      const res = await api.get('/notifications/unread-count')
+      return res.data.count
+    },
+    refetchInterval: 30000,
+  })
 
   const handleLogout = async () => {
     await logout()
@@ -44,7 +55,7 @@ export default function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 p-3 overflow-y-auto">
         <ul className="space-y-0.5">
-          {navItems.map(({ icon: Icon, label, path }) => {
+          {navItems.map(({ icon: Icon, label, path, badge }) => {
             const active = location.pathname === path
             return (
               <li key={label}>
@@ -56,7 +67,14 @@ export default function Sidebar() {
                       : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   }`}
                 >
-                  <Icon size={16} />
+                  <span className="relative">
+                    <Icon size={16} />
+                    {badge && unreadCount > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] px-[3px] rounded-full bg-red-500 text-white text-[9px] font-semibold flex items-center justify-center leading-none">
+                        {unreadCount > 9 ? '9+' : unreadCount}
+                      </span>
+                    )}
+                  </span>
                   {label}
                 </button>
               </li>

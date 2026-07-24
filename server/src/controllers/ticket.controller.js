@@ -372,6 +372,46 @@ exports.updateTicket = async (req, res) => {
       );
     }
 
+    // Notify newly assigned user
+    if (assignee_id !== undefined && assignee_id && assignee_id !== ticket.assignee_id) {
+      await db.query(
+        `INSERT INTO map_ticket_watchers (id, ticket_id, user_id)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [uuidv4(), ticket.id, assignee_id]
+      );
+      if (assignee_id !== req.user.id) {
+        await db.query(
+          `INSERT INTO notifications
+            (id, user_id, ticket_id, notif_type_id, actor_id, payload)
+           VALUES ($1, $2, $3,
+             (SELECT id FROM mst_notification_type WHERE code = 'assigned'),
+             $4, $5)`,
+          [uuidv4(), assignee_id, ticket.id, req.user.id,
+           JSON.stringify({ ticket_key: ticket.ticket_key })]
+        );
+      }
+    }
+
+    // Notify watchers of status change
+    if (status !== undefined && status !== ticket.status_code) {
+      const watchersRes = await db.query(
+        `SELECT user_id FROM map_ticket_watchers
+         WHERE ticket_id = $1 AND user_id != $2`,
+        [ticket.id, req.user.id]
+      );
+      for (const watcher of watchersRes.rows) {
+        await db.query(
+          `INSERT INTO notifications
+            (id, user_id, ticket_id, notif_type_id, actor_id, payload)
+           VALUES ($1, $2, $3,
+             (SELECT id FROM mst_notification_type WHERE code = 'status_changed'),
+             $4, $5)`,
+          [uuidv4(), watcher.user_id, ticket.id, req.user.id,
+           JSON.stringify({ ticket_key: ticket.ticket_key, new_value: status })]
+        );
+      }
+    }
+
     return res.status(200).json(updateRes.rows[0]);
   } catch (err) {
     console.error('Update ticket error:', err);

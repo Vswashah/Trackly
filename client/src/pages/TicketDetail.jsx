@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Sparkles, Bot, Send, Clock, User, Tag, Calendar } from 'lucide-react'
+import { ArrowLeft, Sparkles, Bot, Send, Clock, User, Tag, Calendar, Wand2, ThumbsUp, ThumbsDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Sidebar from '../components/Sidebar'
 import api from '../lib/api'
@@ -31,6 +31,11 @@ export default function TicketDetail() {
   const [loadingHints, setLoadingHints] = useState(false)
   const [loadingSummary, setLoadingSummary] = useState(false)
   const [activeAI, setActiveAI] = useState(null)
+  const [summaryInteractionId, setSummaryInteractionId] = useState(null)
+  const [hintsInteractionId, setHintsInteractionId] = useState(null)
+  const [feedbackGiven, setFeedbackGiven] = useState({})
+  const [suggestedPriority, setSuggestedPriority] = useState(null)
+  const [loadingSuggest, setLoadingSuggest] = useState(false)
 
   const { data: ticket, isLoading } = useQuery({
     queryKey: ['ticket', ticketKey],
@@ -68,6 +73,7 @@ export default function TicketDetail() {
     try {
       const res = await api.post(`/ai/summarize/${ticketKey}`)
       setSummary(res.data.summary)
+      setSummaryInteractionId(res.data.interaction_id)
     } catch (err) {
       toast.error(err.response?.data?.error || 'AI unavailable')
       setActiveAI(null)
@@ -82,11 +88,44 @@ export default function TicketDetail() {
     try {
       const res = await api.get(`/ai/hints/${ticketKey}`)
       setHints(res.data.hints)
+      setHintsInteractionId(res.data.interaction_id)
     } catch (err) {
       toast.error(err.response?.data?.error || 'AI unavailable')
       setActiveAI(null)
     } finally {
       setLoadingHints(false)
+    }
+  }
+
+  const getSuggestedPriority = async () => {
+    if (!ticket) return
+    setLoadingSuggest(true)
+    try {
+      const res = await api.post('/ai/suggest-priority', {
+        title: ticket.title,
+        description: ticket.description,
+      })
+      setSuggestedPriority(res.data)
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'AI unavailable')
+    } finally {
+      setLoadingSuggest(false)
+    }
+  }
+
+  const applySuggestedPriority = () => {
+    if (!suggestedPriority) return
+    updateMutation.mutate({ priority: suggestedPriority.priority })
+    setSuggestedPriority(null)
+  }
+
+  const sendFeedback = async (interactionId, wasHelpful) => {
+    if (!interactionId || feedbackGiven[interactionId]) return
+    try {
+      await api.post(`/ai/feedback/${interactionId}`, { was_helpful: wasHelpful })
+      setFeedbackGiven(prev => ({ ...prev, [interactionId]: wasHelpful ? 'up' : 'down' }))
+    } catch {
+      toast.error('Failed to record feedback')
     }
   }
 
@@ -185,9 +224,16 @@ export default function TicketDetail() {
               {/* AI Output */}
               {activeAI === 'summary' && summary && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <Sparkles size={13} className="text-amber-600" />
-                    <span className="text-xs font-medium text-amber-700">Summary</span>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles size={13} className="text-amber-600" />
+                      <span className="text-xs font-medium text-amber-700">Summary</span>
+                    </div>
+                    <FeedbackButtons
+                      interactionId={summaryInteractionId}
+                      given={feedbackGiven[summaryInteractionId]}
+                      onFeedback={sendFeedback}
+                    />
                   </div>
                   <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">{summary}</pre>
                 </div>
@@ -195,9 +241,16 @@ export default function TicketDetail() {
 
               {activeAI === 'hints' && hints && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <Bot size={13} className="text-blue-600" />
-                    <span className="text-xs font-medium text-blue-700">Resolution Hints</span>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <Bot size={13} className="text-blue-600" />
+                      <span className="text-xs font-medium text-blue-700">Resolution Hints</span>
+                    </div>
+                    <FeedbackButtons
+                      interactionId={hintsInteractionId}
+                      given={feedbackGiven[hintsInteractionId]}
+                      onFeedback={sendFeedback}
+                    />
                   </div>
                   <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">{hints}</pre>
                 </div>
@@ -308,7 +361,17 @@ export default function TicketDetail() {
 
               {/* Priority */}
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">Priority</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-gray-400 block">Priority</label>
+                  <button
+                    onClick={getSuggestedPriority}
+                    disabled={loadingSuggest}
+                    className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
+                  >
+                    <Wand2 size={11} />
+                    {loadingSuggest ? 'Thinking...' : 'Suggest'}
+                  </button>
+                </div>
                 <select
                   className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-gray-400 bg-white"
                   value={ticket.priority}
@@ -319,6 +382,32 @@ export default function TicketDetail() {
                   <option value="p2">P2 — Medium</option>
                   <option value="p3">P3 — Low</option>
                 </select>
+
+                {suggestedPriority && (
+                  <div className="mt-2 bg-indigo-50 border border-indigo-200 rounded-lg p-2.5">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium text-indigo-700">
+                        Suggested: {suggestedPriority.priority?.toUpperCase()}
+                        {' '}({Math.round((suggestedPriority.confidence || 0) * 100)}%)
+                      </span>
+                    </div>
+                    <p className="text-xs text-indigo-600 mb-2">{suggestedPriority.reason}</p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={applySuggestedPriority}
+                        className="text-xs px-2 py-1 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+                      >
+                        Apply
+                      </button>
+                      <button
+                        onClick={() => setSuggestedPriority(null)}
+                        className="text-xs px-2 py-1 text-indigo-600 hover:text-indigo-800"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <hr className="border-gray-100" />
@@ -378,6 +467,31 @@ export default function TicketDetail() {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function FeedbackButtons({ interactionId, given, onFeedback }) {
+  if (!interactionId) return null
+  if (given) {
+    return <span className="text-xs text-gray-400">Thanks for the feedback!</span>
+  }
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => onFeedback(interactionId, true)}
+        className="text-gray-400 hover:text-green-600 transition-colors"
+        title="Helpful"
+      >
+        <ThumbsUp size={13} />
+      </button>
+      <button
+        onClick={() => onFeedback(interactionId, false)}
+        className="text-gray-400 hover:text-red-600 transition-colors"
+        title="Not helpful"
+      >
+        <ThumbsDown size={13} />
+      </button>
     </div>
   )
 }
