@@ -34,6 +34,8 @@ app.use('/api/v1/projects', require('./routes/project.routes'));
 app.use('/api/v1/projects/:projectId/tickets', require('./routes/ticket.routes'));
 app.use('/api/v1/tickets/:ticketId/comments', require('./routes/comment.routes'));
 app.use('/api/v1/ai', require('./routes/ai.routes'));
+app.use('/api/v1/notifications', require('./routes/notification.routes'));
+app.use('/api/v1/team', require('./routes/team.routes'));
 
 
 

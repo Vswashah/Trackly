@@ -13,6 +13,9 @@ router.post('/refresh', authController.refresh);
 // Protected routes
 router.post('/logout', authMiddleware, authController.logout);
 router.get('/me', authMiddleware, authController.me);
+router.patch('/me', authMiddleware, authController.updateProfile);
+router.patch('/preferences', authMiddleware, authController.updatePreferences);
+router.post('/change-password', authMiddleware, authController.changePassword);
 
 // Google OAuth routes
 router.get('/google',
