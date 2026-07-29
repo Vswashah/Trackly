@@ -11,6 +11,7 @@ import AuthCallback from './pages/AuthCallback'
 import Settings from './pages/Settings'
 import TeamMembers from './pages/TeamMembers'
 import Notifications from './pages/Notifications'
+import ProjectDocs from './pages/ProjectDocs'
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuthStore()
@@ -56,6 +57,11 @@ export default function App() {
       <Route path="/projects/:projectId/tickets/:ticketKey" element={
         <ProtectedRoute>
           <TicketDetail />
+        </ProtectedRoute>
+      } />
+      <Route path="/projects/:projectId/docs" element={
+        <ProtectedRoute>
+          <ProjectDocs />
         </ProtectedRoute>
       } />
       <Route path="/settings" element={
