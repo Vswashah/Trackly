@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Sparkles, Bot, Send, Clock, User, Tag, Calendar, Wand2, ThumbsUp, ThumbsDown } from 'lucide-react'
+import { ArrowLeft, Sparkles, Bot, Send, Clock, User, Tag, Calendar, Wand2, ThumbsUp, ThumbsDown, X, Plus, Paperclip, Download, Trash2, RotateCcw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Sidebar from '../components/Sidebar'
 import api from '../lib/api'
@@ -21,6 +21,8 @@ const STATUS_STYLES = {
   cancelled: 'bg-red-50 text-red-600',
 }
 
+const REVERTIBLE_FIELDS = ['title', 'description', 'status', 'priority', 'assignee_id', 'due_date', 'estimate_points', 'position', 'acceptance_criteria']
+
 export default function TicketDetail() {
   const { projectId, ticketKey } = useParams()
   const navigate = useNavigate()
@@ -36,6 +38,8 @@ export default function TicketDetail() {
   const [feedbackGiven, setFeedbackGiven] = useState({})
   const [suggestedPriority, setSuggestedPriority] = useState(null)
   const [loadingSuggest, setLoadingSuggest] = useState(false)
+  const [showLabelPicker, setShowLabelPicker] = useState(false)
+  const [acceptanceCriteria, setAcceptanceCriteria] = useState(null)
 
   const { data: ticket, isLoading } = useQuery({
     queryKey: ['ticket', ticketKey],
@@ -44,6 +48,10 @@ export default function TicketDetail() {
       return res.data
     }
   })
+
+  useEffect(() => {
+    if (ticket) setAcceptanceCriteria(ticket.acceptance_criteria || '')
+  }, [ticket?.id])
 
   const updateMutation = useMutation({
     mutationFn: async (updates) => {
@@ -56,6 +64,29 @@ export default function TicketDetail() {
     },
   })
 
+  const { data: projectLabels = [] } = useQuery({
+    queryKey: ['labels', projectId],
+    queryFn: async () => {
+      const res = await api.get(`/projects/${projectId}/labels`)
+      return res.data
+    }
+  })
+
+  const addLabelMutation = useMutation({
+    mutationFn: async (labelId) => api.post(`/projects/${projectId}/tickets/${ticketKey}/labels`, { label_id: labelId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['ticket', ticketKey])
+      setShowLabelPicker(false)
+    },
+    onError: (err) => toast.error(err.response?.data?.error || 'Failed to add label'),
+  })
+
+  const removeLabelMutation = useMutation({
+    mutationFn: async (labelId) => api.delete(`/projects/${projectId}/tickets/${ticketKey}/labels/${labelId}`),
+    onSuccess: () => queryClient.invalidateQueries(['ticket', ticketKey]),
+    onError: () => toast.error('Failed to remove label'),
+  })
+
   const commentMutation = useMutation({
     mutationFn: async (body) => {
       await api.post(`/tickets/${ticket.id}/comments`, { body })
@@ -65,6 +96,40 @@ export default function TicketDetail() {
       setComment('')
       toast.success('Comment added')
     },
+  })
+
+  const uploadMutation = useMutation({
+    mutationFn: async (file) => {
+      const formData = new FormData()
+      formData.append('file', file)
+      await api.post(`/tickets/${ticket.id}/attachments`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['ticket', ticketKey])
+      toast.success('File uploaded')
+    },
+    onError: (err) => toast.error(err.response?.data?.error || 'Upload failed'),
+  })
+
+  const revertMutation = useMutation({
+    mutationFn: async (historyId) => api.patch(`/projects/${projectId}/tickets/${ticketKey}/history/${historyId}/revert`),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['ticket', ticketKey])
+      queryClient.invalidateQueries(['tickets', projectId])
+      toast.success('Change reverted')
+    },
+    onError: (err) => toast.error(err.response?.data?.error || 'Could not revert this change'),
+  })
+
+  const deleteAttachmentMutation = useMutation({
+    mutationFn: async (attachmentId) => api.delete(`/tickets/${ticket.id}/attachments/${attachmentId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['ticket', ticketKey])
+      toast.success('Attachment removed')
+    },
+    onError: () => toast.error('Failed to remove attachment'),
   })
 
   const getSummary = async () => {
@@ -199,6 +264,29 @@ export default function TicketDetail() {
               </p>
             </div>
 
+            {/* Acceptance Criteria (BDD / Gherkin) */}
+            <div className="bg-white rounded-xl border border-gray-200 p-5 mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide">Acceptance Criteria</h3>
+                {acceptanceCriteria !== (ticket.acceptance_criteria || '') && (
+                  <button
+                    onClick={() => updateMutation.mutate({ acceptance_criteria: acceptanceCriteria })}
+                    disabled={updateMutation.isPending}
+                    className="text-xs px-2.5 py-1 bg-black text-white rounded-md font-medium hover:bg-gray-800 disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                )}
+              </div>
+              <textarea
+                className="w-full px-3 py-2.5 text-sm font-mono border border-gray-200 rounded-lg outline-none focus:border-gray-400 resize-y leading-relaxed"
+                rows={5}
+                placeholder={'Given <precondition>\nWhen <action>\nThen <expected outcome>'}
+                value={acceptanceCriteria ?? ''}
+                onChange={e => setAcceptanceCriteria(e.target.value)}
+              />
+            </div>
+
             {/* AI Section */}
             <div className="bg-white rounded-xl border border-gray-200 p-5 mb-4">
               <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">AI Features</h3>
@@ -255,6 +343,59 @@ export default function TicketDetail() {
                   <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">{hints}</pre>
                 </div>
               )}
+            </div>
+
+            {/* Attachments */}
+            <div className="bg-white rounded-xl border border-gray-200 p-5 mb-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+                  Attachments ({ticket.attachments?.length || 0})
+                </h3>
+                <label className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 cursor-pointer">
+                  <Paperclip size={12} />
+                  {uploadMutation.isPending ? 'Uploading...' : 'Add file'}
+                  <input
+                    type="file"
+                    className="hidden"
+                    disabled={uploadMutation.isPending}
+                    onChange={e => {
+                      if (e.target.files[0]) uploadMutation.mutate(e.target.files[0])
+                      e.target.value = ''
+                    }}
+                  />
+                </label>
+              </div>
+
+              <div className="space-y-2">
+                {ticket.attachments?.map(a => (
+                  <div key={a.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-gray-100">
+                    <Paperclip size={14} className="text-gray-300 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-gray-900 truncate">{a.file_name}</div>
+                      <div className="text-xs text-gray-400">
+                        {formatFileSize(a.file_size_bytes)} · {a.uploaded_by_name}
+                      </div>
+                    </div>
+                    <a
+                      href={a.storage_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-gray-400 hover:text-gray-700"
+                    >
+                      <Download size={14} />
+                    </a>
+                    <button
+                      onClick={() => deleteAttachmentMutation.mutate(a.id)}
+                      className="text-gray-300 hover:text-red-500"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+                {!ticket.attachments?.length && (
+                  <p className="text-sm text-gray-400 text-center py-4">No files attached</p>
+                )}
+              </div>
             </div>
 
             {/* Comments */}
@@ -318,22 +459,50 @@ export default function TicketDetail() {
             {/* Activity */}
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-4">Activity</h3>
-              <div className="space-y-2">
-                {ticket.history?.map((h, i) => (
-                  <div key={i} className="flex items-start gap-2 text-xs text-gray-500 py-1 border-b border-gray-50 last:border-0">
-                    <Clock size={11} className="mt-0.5 flex-shrink-0 text-gray-300" />
-                    <span>
-                      <span className="font-medium text-gray-700">{h.actor_name}</span>
-                      {h.field_name === 'created'
-                        ? ' created this ticket'
-                        : ` changed ${h.field_name} to "${h.new_value}"`
-                      }
-                    </span>
-                    <span className="ml-auto flex-shrink-0 text-gray-300">
-                      {new Date(h.changed_at).toLocaleDateString()}
-                    </span>
-                  </div>
-                ))}
+              <div className="space-y-2.5">
+                {ticket.history?.map(h => {
+                  const revertible = REVERTIBLE_FIELDS.includes(h.field_name)
+                  return (
+                    <div key={h.id ?? `${h.field_name}-${h.changed_at}`} className="flex items-start gap-2 text-xs text-gray-500 py-1.5 border-b border-gray-50 last:border-0">
+                      <Clock size={11} className="mt-0.5 flex-shrink-0 text-gray-300" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center flex-wrap gap-x-1">
+                          <span className="font-medium text-gray-700">{h.actor_name}</span>
+                          {h.field_name === 'created' ? (
+                            <span>created this ticket</span>
+                          ) : h.change_type === 'comment_added' ? (
+                            <span>added a comment</span>
+                          ) : (
+                            <>
+                              <span>changed {h.field_name.replace('_', ' ')}</span>
+                              {h.old_value && (
+                                <>
+                                  <span className="line-through text-gray-400 bg-red-50 px-1 rounded">{h.old_value}</span>
+                                  <span className="text-gray-300">→</span>
+                                </>
+                              )}
+                              <span className="text-gray-700 bg-green-50 px-1 rounded font-medium">{h.new_value || '—'}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      {revertible && (
+                        <button
+                          onClick={() => revertMutation.mutate(h.id)}
+                          disabled={revertMutation.isPending}
+                          className="flex items-center gap-1 text-gray-400 hover:text-gray-800 flex-shrink-0 disabled:opacity-40"
+                          title="Revert this change"
+                        >
+                          <RotateCcw size={11} />
+                          Revert
+                        </button>
+                      )}
+                      <span className="flex-shrink-0 text-gray-300">
+                        {new Date(h.changed_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           </div>
@@ -421,6 +590,60 @@ export default function TicketDetail() {
                 <span className="text-xs text-gray-700 font-medium">{ticket.type}</span>
               </div>
 
+              {/* Labels */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs text-gray-400 block">Labels</label>
+                  <button
+                    onClick={() => setShowLabelPicker(v => !v)}
+                    className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800"
+                  >
+                    <Plus size={11} />
+                    Add
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {ticket.labels?.map(label => (
+                    <span
+                      key={label.id}
+                      className="flex items-center gap-1 text-xs pl-2 pr-1 py-0.5 rounded-full border border-gray-200 text-gray-600"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: label.color_hex }} />
+                      {label.name}
+                      <button
+                        onClick={() => removeLabelMutation.mutate(label.id)}
+                        className="text-gray-300 hover:text-red-500"
+                      >
+                        <X size={10} />
+                      </button>
+                    </span>
+                  ))}
+                  {!ticket.labels?.length && !showLabelPicker && (
+                    <span className="text-xs text-gray-300">No labels</span>
+                  )}
+                </div>
+
+                {showLabelPicker && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {projectLabels
+                      .filter(l => !ticket.labels?.some(tl => tl.id === l.id))
+                      .map(label => (
+                        <button
+                          key={label.id}
+                          onClick={() => addLabelMutation.mutate(label.id)}
+                          className="flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border border-dashed border-gray-300 text-gray-500 hover:border-gray-400 hover:text-gray-700"
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: label.color_hex }} />
+                          {label.name}
+                        </button>
+                      ))}
+                    {!projectLabels.filter(l => !ticket.labels?.some(tl => tl.id === l.id)).length && (
+                      <span className="text-xs text-gray-300">No more labels in this project</span>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Reporter */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-xs text-gray-400">
@@ -469,6 +692,12 @@ export default function TicketDetail() {
       </div>
     </div>
   )
+}
+
+function formatFileSize(bytes) {
+  if (!bytes) return '0 KB'
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function FeedbackButtons({ interactionId, given, onFeedback }) {

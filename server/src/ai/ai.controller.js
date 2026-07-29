@@ -2,6 +2,8 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../config/db');
 const { generateEmbedding } = require('./embedding.service');
 const Anthropic = require('@anthropic-ai/sdk').default;
+const ticketController = require('../controllers/ticket.controller');
+const sprintController = require('../controllers/sprint.controller');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -13,6 +15,19 @@ const llm = async (prompt) => {
   });
   return msg.content[0].text;
 };
+
+// Calls an Express controller function with a stand-in req/res so chat tools reuse
+// the exact same business logic (ticket key generation, history, notifications) as
+// the real HTTP endpoints, instead of duplicating it.
+const callController = (fn, { params = {}, body = {}, query = {}, user }) =>
+  new Promise((resolve) => {
+    let statusCode = 200;
+    const fakeRes = {
+      status(code) { statusCode = code; return this; },
+      json(payload) { resolve({ statusCode, payload }); return this; },
+    };
+    fn({ params, body, query, user }, fakeRes);
+  });
 
 // ── POST /ai/similar ──────────────────────────────────────────────
 exports.findSimilar = async (req, res) => {
@@ -252,8 +267,8 @@ exports.submitFeedback = async (req, res) => {
 
   try {
     const result = await db.query(
-      `UPDATE ai_interactions SET was_helpful = $1 WHERE id = $2 RETURNING id`,
-      [was_helpful, interactionId]
+      `UPDATE ai_interactions SET was_helpful = $1 WHERE id = $2 AND user_id = $3 RETURNING id`,
+      [was_helpful, interactionId, req.user.id]
     );
     if (!result.rows.length) {
       return res.status(404).json({ error: 'Interaction not found' });
@@ -262,5 +277,140 @@ exports.submitFeedback = async (req, res) => {
   } catch (err) {
     console.error('Feedback error:', err);
     return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// ── AI planning chat ────────────────────────────────────────────────
+
+const CHAT_TOOLS = [
+  {
+    name: 'create_ticket',
+    description: 'Create a new ticket (task, bug, feature, chore, or spike) in the project.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        description: { type: 'string' },
+        priority: { type: 'string', enum: ['p0', 'p1', 'p2', 'p3'] },
+        type: { type: 'string', enum: ['bug', 'feature', 'chore', 'spike', 'task'] },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'list_tickets',
+    description: "List the project's tickets, optionally filtered by status.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['open', 'in_progress', 'in_review', 'done', 'cancelled'] },
+      },
+    },
+  },
+  {
+    name: 'update_ticket',
+    description: "Update a ticket's status and/or priority.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        ticket_key: { type: 'string', description: 'e.g. "TRK-001"' },
+        status: { type: 'string', enum: ['open', 'in_progress', 'in_review', 'done', 'cancelled'] },
+        priority: { type: 'string', enum: ['p0', 'p1', 'p2', 'p3'] },
+      },
+      required: ['ticket_key'],
+    },
+  },
+  {
+    name: 'create_sprint',
+    description: 'Create a new sprint in the project.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        goal: { type: 'string' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'list_sprints',
+    description: "List the project's sprints.",
+    input_schema: { type: 'object', properties: {} },
+  },
+];
+
+const executeChatTool = async (name, input, { projectId, user }) => {
+  switch (name) {
+    case 'create_ticket':
+      return callController(ticketController.createTicket, { params: { projectId }, body: input, user });
+    case 'list_tickets':
+      return callController(ticketController.listTickets, { params: { projectId }, query: { status: input.status, limit: 100 }, user });
+    case 'update_ticket':
+      return callController(ticketController.updateTicket, {
+        params: { projectId, ticketKey: input.ticket_key },
+        body: { status: input.status, priority: input.priority },
+        user,
+      });
+    case 'create_sprint':
+      return callController(sprintController.createSprint, { params: { projectId }, body: input, user });
+    case 'list_sprints':
+      return callController(sprintController.listSprints, { params: { projectId }, user });
+    default:
+      return { statusCode: 400, payload: { error: `Unknown tool: ${name}` } };
+  }
+};
+
+// ── POST /ai/chat ─────────────────────────────────────────────────
+exports.chat = async (req, res) => {
+  const { project_id, messages } = req.body;
+  if (!project_id || !Array.isArray(messages) || !messages.length) {
+    return res.status(400).json({ error: 'project_id and messages are required' });
+  }
+
+  try {
+    const conversation = messages.map(m => ({ role: m.role, content: m.content }));
+    const actions = [];
+    let replyText = '';
+
+    for (let turn = 0; turn < 5; turn++) {
+      const response = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        system: `You are an AI planning assistant embedded in Trackly, a project management tool. \
+You help the user plan work by creating and updating tickets and sprints in project ${project_id} using the tools available to you. \
+Be concise and conversational. When you take an action, briefly confirm what you did.`,
+        tools: CHAT_TOOLS,
+        messages: conversation,
+      });
+
+      const toolUses = response.content.filter(b => b.type === 'tool_use');
+      const text = response.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
+      if (text) replyText += (replyText ? '\n' : '') + text;
+
+      if (response.stop_reason !== 'tool_use' || !toolUses.length) break;
+
+      conversation.push({ role: 'assistant', content: response.content });
+
+      const toolResults = [];
+      for (const toolUse of toolUses) {
+        const { statusCode, payload } = await executeChatTool(toolUse.name, toolUse.input, {
+          projectId: project_id,
+          user: req.user,
+        });
+        actions.push({ tool: toolUse.name, input: toolUse.input, ok: statusCode < 400, result: payload });
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolUse.id,
+          content: JSON.stringify(payload),
+          is_error: statusCode >= 400,
+        });
+      }
+      conversation.push({ role: 'user', content: toolResults });
+    }
+
+    return res.status(200).json({ reply: replyText || '(no response)', actions });
+  } catch (err) {
+    console.error('AI chat error:', err);
+    return res.status(503).json({ error: 'AI service unavailable', detail: err.message });
   }
 };

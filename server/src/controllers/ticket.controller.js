@@ -41,7 +41,7 @@ const getTypeId = async (code) => {
 // ── POST /projects/:projectId/tickets ─────────────────────────────
 exports.createTicket = async (req, res) => {
   const { projectId } = req.params;
-  const { title, description, priority, type, assignee_id, sprint_id, label_ids, due_date, estimate_points } = req.body;
+  const { title, description, priority, type, assignee_id, sprint_id, label_ids, due_date, estimate_points, acceptance_criteria } = req.body;
 
   if (!title) return res.status(400).json({ error: 'title is required' });
 
@@ -64,26 +64,28 @@ exports.createTicket = async (req, res) => {
     const ticketRes = await db.query(
   `INSERT INTO tickets
     (id, project_id, status_id, priority_id, type_id, reporter_id, assignee_id,
-     parent_id, ticket_key, title, description, due_date, estimate_points)
-   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+     parent_id, ticket_key, title, description, due_date, estimate_points, acceptance_criteria)
+   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
    RETURNING *`,
   [
     uuidv4(), projectId, statusId, priorityId, typeId,
     req.user.id, assignee_id || null,
     req.body.parent_id || null, ticketKey, title,
-    description || null, due_date || null, estimate_points || null
+    description || null, due_date || null, estimate_points || null,
+    acceptance_criteria || null
   ]
 );
 
-// Add to sprint via junction table if sprint_id provided
-if (sprint_id) {
-  await db.query(
-    `INSERT INTO map_sprint_tickets (id, sprint_id, ticket_id, added_by)
-     VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-    [uuidv4(), sprint_id, ticket.id, req.user.id]
-  );
-}
     const ticket = ticketRes.rows[0];
+
+    // Add to sprint via junction table if sprint_id provided
+    if (sprint_id) {
+      await db.query(
+        `INSERT INTO map_sprint_tickets (id, sprint_id, ticket_id, added_by)
+         VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+        [uuidv4(), sprint_id, ticket.id, req.user.id]
+      );
+    }
 
     // Add labels if provided
     if (label_ids?.length) {
@@ -262,7 +264,7 @@ exports.getTicket = async (req, res) => {
 
     // Get recent history
     const historyRes = await db.query(
-      `SELECT th.field_name, th.old_value, th.new_value, th.changed_at,
+      `SELECT th.id, th.field_name, th.old_value, th.new_value, th.changed_at,
               ct.code as change_type,
               u.full_name as actor_name
        FROM ticket_history th
@@ -274,11 +276,23 @@ exports.getTicket = async (req, res) => {
       [ticket.id]
     );
 
+    // Get attachments
+    const attachmentsRes = await db.query(
+      `SELECT a.id, a.file_name, a.file_type, a.file_size_bytes, a.storage_url, a.created_at,
+              u.full_name as uploaded_by_name
+       FROM attachments a
+       LEFT JOIN users u ON u.id = a.uploaded_by
+       WHERE a.ticket_id = $1 AND a.deleted_at IS NULL
+       ORDER BY a.created_at DESC`,
+      [ticket.id]
+    );
+
     return res.status(200).json({
       ...ticket,
       labels: labelsRes.rows,
       comments: commentsRes.rows,
       history: historyRes.rows,
+      attachments: attachmentsRes.rows,
     });
   } catch (err) {
     console.error('Get ticket error:', err);
@@ -289,7 +303,7 @@ exports.getTicket = async (req, res) => {
 // ── PATCH /projects/:projectId/tickets/:ticketKey ─────────────────
 exports.updateTicket = async (req, res) => {
   const { ticketKey } = req.params;
-  const { title, description, priority, status, assignee_id, position, due_date, estimate_points } = req.body;
+  const { title, description, priority, status, assignee_id, position, due_date, estimate_points, acceptance_criteria } = req.body;
 
   try {
     const ticketRes = await db.query(
@@ -321,6 +335,7 @@ exports.updateTicket = async (req, res) => {
     if (due_date !== undefined)     await addUpdate('due_date', due_date);
     if (estimate_points !== undefined) await addUpdate('estimate_points', estimate_points);
     if (assignee_id !== undefined)  await addUpdate('assignee_id', assignee_id);
+    if (acceptance_criteria !== undefined) await addUpdate('acceptance_criteria', acceptance_criteria);
 
     if (status !== undefined) {
       const statusId = await getStatusId(status);
@@ -348,17 +363,38 @@ exports.updateTicket = async (req, res) => {
       [...params, ticket.id]
     );
 
-    // Log to ticket history
+    // Log to ticket history. `status`/`priority` are codes, not columns (the
+    // columns are status_id/priority_id), and assignee_id reads better as a name,
+    // so those three need their old/new values resolved specially.
     const changedFields = Object.keys(req.body);
+    let assigneeNames = null;
     for (const field of changedFields) {
+      let oldValue = String(ticket[field] ?? '');
+      let newValue = String(req.body[field] ?? '');
+
+      if (field === 'status') {
+        oldValue = ticket.status_code || '';
+      } else if (field === 'priority') {
+        oldValue = ticket.priority_code || '';
+      } else if (field === 'assignee_id') {
+        if (!assigneeNames) {
+          const namesRes = await db.query(
+            `SELECT id, full_name FROM users WHERE id = ANY($1::uuid[])`,
+            [[ticket.assignee_id, assignee_id].filter(Boolean)]
+          );
+          assigneeNames = Object.fromEntries(namesRes.rows.map(u => [u.id, u.full_name]));
+        }
+        oldValue = ticket.assignee_id ? (assigneeNames[ticket.assignee_id] || '') : 'Unassigned';
+        newValue = assignee_id ? (assigneeNames[assignee_id] || '') : 'Unassigned';
+      }
+
       await db.query(
         `INSERT INTO ticket_history
           (id, ticket_id, actor_id, change_type_id, field_name, old_value, new_value)
          VALUES ($1, $2, $3,
            (SELECT id FROM mst_change_type WHERE code = 'field_change'),
            $4, $5, $6)`,
-        [uuidv4(), ticket.id, req.user.id, field,
-         String(ticket[field] || ''), String(req.body[field] || '')]
+        [uuidv4(), ticket.id, req.user.id, field, oldValue, newValue]
       );
     }
 
@@ -415,6 +451,57 @@ exports.updateTicket = async (req, res) => {
     return res.status(200).json(updateRes.rows[0]);
   } catch (err) {
     console.error('Update ticket error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// ── PATCH /projects/:projectId/tickets/:ticketKey/history/:historyId/revert ──
+const REVERTIBLE_FIELDS = ['title', 'description', 'status', 'priority', 'assignee_id', 'due_date', 'estimate_points', 'position', 'acceptance_criteria'];
+
+exports.revertHistoryEntry = async (req, res) => {
+  const { ticketKey, historyId } = req.params;
+
+  try {
+    const ticketRes = await db.query(
+      `SELECT id FROM tickets WHERE ticket_key = $1 AND is_deleted = false`,
+      [ticketKey]
+    );
+    if (!ticketRes.rows.length) return res.status(404).json({ error: 'Ticket not found' });
+    const ticketId = ticketRes.rows[0].id;
+
+    const historyRes = await db.query(
+      `SELECT th.field_name, th.old_value, ct.code as change_type
+       FROM ticket_history th
+       LEFT JOIN mst_change_type ct ON ct.id = th.change_type_id
+       WHERE th.id = $1 AND th.ticket_id = $2`,
+      [historyId, ticketId]
+    );
+    if (!historyRes.rows.length) return res.status(404).json({ error: 'History entry not found' });
+    const entry = historyRes.rows[0];
+
+    if (entry.change_type !== 'field_change' || !REVERTIBLE_FIELDS.includes(entry.field_name)) {
+      return res.status(400).json({ error: 'This change cannot be reverted' });
+    }
+
+    let revertBody;
+    if (entry.field_name === 'assignee_id') {
+      if (!entry.old_value || entry.old_value === 'Unassigned') {
+        revertBody = { assignee_id: null };
+      } else {
+        const userRes = await db.query(`SELECT id FROM users WHERE full_name = $1 LIMIT 1`, [entry.old_value]);
+        if (!userRes.rows.length) {
+          return res.status(409).json({ error: 'Cannot resolve the original assignee — they may have been renamed or removed' });
+        }
+        revertBody = { assignee_id: userRes.rows[0].id };
+      }
+    } else {
+      revertBody = { [entry.field_name]: entry.old_value };
+    }
+
+    req.body = revertBody;
+    return exports.updateTicket(req, res);
+  } catch (err) {
+    console.error('Revert history error:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 };

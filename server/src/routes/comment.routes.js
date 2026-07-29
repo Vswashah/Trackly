@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router({ mergeParams: true });
 const auth = require('../middleware/auth');
+const { requireTicketAccess } = require('../middleware/projectAccess');
 const {
   createComment,
   listComments,
@@ -9,6 +10,7 @@ const {
 } = require('../controllers/comment.controller');
 
 router.use(auth);
+router.use(requireTicketAccess);
 
 router.post('/', createComment);
 router.get('/', listComments);
